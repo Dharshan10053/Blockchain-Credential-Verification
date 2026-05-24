@@ -1,0 +1,83 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>{% block title %}CertAuth{% endblock %} — Smart Certificate Authentication</title>
+  <link rel="stylesheet" href="{{ url_for('static', filename='css/style.css') }}">
+  {% block head_extra %}{% endblock %}
+</head>
+<body>
+
+<nav class="navbar">
+  <div class="nav-inner">
+    <a href="{{ url_for('home') }}" class="nav-logo">
+      <div class="nav-logo-mark">
+        <svg width="16" height="16" viewBox="0 0 16 16" fill="none">
+          <path d="M8 1L14 4.5V11.5L8 15L2 11.5V4.5L8 1Z" stroke="white" stroke-width="1.5" stroke-linejoin="round"/>
+          <circle cx="8" cy="8" r="2" fill="white"/>
+        </svg>
+      </div>
+      <div>
+        <div class="nav-brand">CertAuth</div>
+        <div class="nav-tagline">Blockchain Certificate Verification</div>
+      </div>
+    </a>
+
+    <ul class="nav-links">
+      <li><a href="{{ url_for('home') }}" {% if request.endpoint == 'home' %}class="active"{% endif %}>Home</a></li>
+      <li><a href="{{ url_for('issue') }}" {% if request.endpoint == 'issue' %}class="active"{% endif %}>
+        <svg width="14" height="14" fill="none" stroke="currentColor" stroke-width="1.6" viewBox="0 0 24 24"><path d="M12 5v14M5 12h14" stroke-linecap="round"/></svg>
+        Issue
+      </a></li>
+      <li><a href="{{ url_for('verify') }}" {% if request.endpoint == 'verify' %}class="active"{% endif %}>
+        <svg width="14" height="14" fill="none" stroke="currentColor" stroke-width="1.6" viewBox="0 0 24 24"><path d="M9 12l2 2 4-4" stroke-linecap="round" stroke-linejoin="round"/><circle cx="12" cy="12" r="9"/></svg>
+        Verify
+      </a></li>
+      <li><a href="{{ url_for('ledger') }}" {% if request.endpoint == 'ledger' %}class="active"{% endif %}>Ledger</a></li>
+    </ul>
+  </div>
+</nav>
+
+<main>
+  {% block content %}{% endblock %}
+</main>
+
+<footer>
+  <div class="container">
+    CertAuth &mdash; Smart Certificate Authentication Using Blockchain &amp; AI &middot;
+    Chain integrity verified on every request
+  </div>
+</footer>
+
+<div id="global-loader" class="global-loader">
+  <div class="loader-bg-animation">
+    <canvas id="loader-canvas"></canvas>
+  </div>
+  <div class="loader-content">
+    <div class="loader-logo-reveal">
+      <svg width="32" height="32" viewBox="0 0 16 16" fill="none">
+        <path d="M8 1L14 4.5V11.5L8 15L2 11.5V4.5L8 1Z" stroke="url(#loader-grad)" stroke-width="1.5" stroke-linejoin="round"/>
+        <circle cx="8" cy="8" r="2" fill="url(#loader-grad)"/>
+        <defs>
+          <linearGradient id="loader-grad" x1="0" y1="0" x2="16" y2="16" gradientUnits="userSpaceOnUse">
+            <stop stop-color="#06B6D4"/>
+            <stop offset="1" stop-color="#2563EB"/>
+          </linearGradient>
+        </defs>
+      </svg>
+    </div>
+    <div class="loader-typography-mask">
+      <h2 class="loader-title" id="loader-status-text">Authenticating</h2>
+    </div>
+    <div class="loader-progress-elegant">
+      <div class="loader-progress-fill"></div>
+    </div>
+    <div class="loader-hash-elegant" id="loader-hash-text">Establishing secure connection...</div>
+  </div>
+</div>
+
+<script src="{{ url_for('static', filename='js/script.js') }}"></script>
+{% block scripts %}{% endblock %}
+</body>
+</html>

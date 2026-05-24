@@ -1,0 +1,146 @@
+{% extends "base.html" %}
+{% block title %}{{ "Issue" if action == "issue" else "Verify" }}{% endblock %}
+
+{% block content %}
+<canvas id="bg-animation"></canvas>
+<div class="container page-wrap" style="position: relative; z-index: 10;">
+  <div class="upload-page">
+
+    <div class="upload-header fade-up">
+      <div class="section-label">
+        {{ "Certificate Issuance" if action == "issue" else "Certificate Verification" }}
+      </div>
+      <h1>
+        {% if action == "issue" %}
+          Issue a new certificate
+        {% else %}
+          Verify a certificate
+        {% endif %}
+      </h1>
+      <p>
+        {% if action == "issue" %}
+          Upload your certificate file. We'll extract its details and record it permanently on the blockchain.
+        {% else %}
+          Upload the certificate you want to verify. We'll match it against blockchain records instantly.
+        {% endif %}
+      </p>
+    </div>
+
+    {% if error %}
+      {% if error_type == 'duplicate' %}
+      <div class="duplicate-modal modal-overlay active">
+        <div class="modal-content" style="max-width: 400px;">
+          <div class="modal-icon">
+            <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+              <path d="M10.29 3.86L1.82 18a2 2 0 001.71 3h16.94a2 2 0 001.71-3L13.71 3.86a2 2 0 00-3.42 0z"/>
+              <line x1="12" y1="9" x2="12" y2="13"/>
+              <line x1="12" y1="17" x2="12.01" y2="17"/>
+            </svg>
+          </div>
+          <h3>Certificate Already Exists</h3>
+          <p>{{ error }}</p>
+          
+          {% if duplicate_details %}
+          <div class="confidence-section" style="margin-top: 16px; background: rgba(0,0,0,0.2); padding: 12px;">
+            <div class="confidence-ring-wrap" style="width: 48px; height: 48px;">
+              {% set conf = duplicate_vr.get('confidence_score', duplicate_details.get('confidence_score', 0)) %}
+              {% set color = "green" if conf >= 90 else ("orange" if conf >= 60 else "red") %}
+              <svg class="confidence-ring" viewBox="0 0 100 100">
+                <circle class="ring-bg" cx="50" cy="50" r="45"></circle>
+                <circle class="ring-progress {{ color }}" cx="50" cy="50" r="45"
+                        style="stroke-dashoffset: calc(283 - (283 * {{ conf }}) / 100);"></circle>
+              </svg>
+              <div class="confidence-score-text">
+                <span class="score-num" style="font-size: 11px;">{{ conf|round|int }}%</span>
+              </div>
+            </div>
+            <div class="confidence-info" style="text-align: left;">
+              <p class="confidence-explanation" style="font-size: 11px; margin-bottom: 4px;">{{ duplicate_vr.get('explanation', 'Exact Blockchain Match') }}</p>
+              <p style="font-size: 11px; color: var(--text-faint); margin:0;">ID: {{ duplicate_details.get('certificate_id', '—') }}</p>
+            </div>
+          </div>
+          {% endif %}
+          
+          <button type="button" class="btn btn-secondary btn-full" onclick="this.closest('.modal-overlay').remove()" style="margin-top: 20px;">Dismiss</button>
+        </div>
+      </div>
+      {% else %}
+      <div class="alert alert-error fade-up">
+        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" flex-shrink="0"><circle cx="12" cy="12" r="9"/><path d="M12 8v4M12 16h.01" stroke-linecap="round"/></svg>
+        <span>{{ error }}</span>
+      </div>
+      {% endif %}
+    {% endif %}
+
+    <div class="card card-padded fade-up fade-up-1">
+      <form method="POST" enctype="multipart/form-data" class="upload-form">
+        <div class="upload-zone" id="dropZone">
+          <input type="file" name="certificate" accept=".png,.jpg,.jpeg,.pdf,.docx" required>
+          <div class="upload-icon">
+            <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8">
+              <path d="M21 15v4a2 2 0 01-2 2H5a2 2 0 01-2-2v-4" stroke-linecap="round"/>
+              <polyline points="17 8 12 3 7 8" stroke-linecap="round" stroke-linejoin="round"/>
+              <line x1="12" y1="3" x2="12" y2="15" stroke-linecap="round"/>
+            </svg>
+          </div>
+          <h3>Drop your file here, or click to browse</h3>
+          <p>Drag and drop a certificate or select from your device</p>
+          <div class="formats">PNG · JPG · PDF · DOCX &nbsp;·&nbsp; Max 16 MB</div>
+        </div>
+
+        <div class="file-selected" id="fileSelected">
+          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M13 2H6a2 2 0 00-2 2v16a2 2 0 002 2h12a2 2 0 002-2V9z"/><polyline points="13 2 13 9 20 9"/></svg>
+          <span>No file selected</span>
+        </div>
+
+        <div style="margin-top:20px;">
+          <button type="submit" class="btn btn-primary btn-full btn-lg">
+            <span class="btn-text">
+              {% if action == "issue" %}
+                <svg width="16" height="16" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24" style="margin-right:6px;vertical-align:-2px"><path d="M12 5v14M5 12h14" stroke-linecap="round"/></svg>
+                Issue Certificate
+              {% else %}
+                <svg width="16" height="16" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24" style="margin-right:6px;vertical-align:-2px"><path d="M9 12l2 2 4-4" stroke-linecap="round" stroke-linejoin="round"/><circle cx="12" cy="12" r="9"/></svg>
+                Verify Certificate
+              {% endif %}
+            </span>
+            <span class="spinner"></span>
+          </button>
+        </div>
+      </form>
+    </div>
+
+    <!-- Info note -->
+    <div style="margin-top:16px;padding:14px 16px;background:var(--bg);border:1px solid var(--border);border-radius:var(--radius-sm);font-size:12px;color:var(--text-muted);">
+      {% if action == "issue" %}
+        <strong style="color:var(--text-mid)">How issuance works:</strong>
+        We extract text via OCR, detect the issuing authority using a position + keyword scoring system,
+        generate a SHA-256 hash, and append a new block to the blockchain ledger.
+      {% else %}
+        <strong style="color:var(--text-mid)">How verification works:</strong>
+        We re-extract and re-hash the uploaded certificate, then compare against all blockchain records.
+        Fuzzy matching (≥ 82% similarity) catches minor OCR noise automatically.
+      {% endif %}
+    </div>
+
+    <div style="margin-top:16px;text-align:center;font-size:13px;color:var(--text-muted);">
+      {% if action == "issue" %}
+        Want to verify instead?
+        <a href="{{ url_for('verify') }}">Go to verification</a>
+      {% else %}
+        Want to issue a new certificate?
+        <a href="{{ url_for('issue') }}">Go to issuance</a>
+      {% endif %}
+    </div>
+
+  </div>
+</div>
+{% endblock %}
+
+{% block scripts %}
+  {% if action == "issue" %}
+    <script src="{{ url_for('static', filename='js/bg-issue.js') }}"></script>
+  {% else %}
+    <script src="{{ url_for('static', filename='js/bg-verify.js') }}"></script>
+  {% endif %}
+{% endblock %}

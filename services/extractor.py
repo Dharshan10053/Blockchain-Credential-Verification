@@ -170,7 +170,11 @@ def _pdf_or_docx_to_bytes(filepath: str) -> Tuple[bytes, str]:
             from docx2pdf import convert as docx2pdf_convert
 
             pdf_path = Path(tmp_dir) / f"{path.stem}.pdf"
-            docx2pdf_convert(str(path), str(pdf_path))
+            try:
+                docx2pdf_convert(str(path), str(pdf_path))
+            except Exception as e:
+                logger.error(f"docx2pdf conversion failed, unsupported on this server: {e}")
+                raise ValueError("docx2pdf conversion is unsupported on this server. Please upload a PDF or image instead.")
             return pdf_path.read_bytes(), "application/pdf"
         finally:
             shutil.rmtree(tmp_dir, ignore_errors=True)
@@ -232,6 +236,9 @@ def _ocr_text_from_images(images: List[Image.Image]) -> str:
     if not texts:
         try:
             import pytesseract
+            
+            if os.name == 'nt':
+                pytesseract.pytesseract.tesseract_cmd = r'C:\Program Files\Tesseract-OCR\tesseract.exe'
 
             for img in images:
                 texts.append(pytesseract.image_to_string(img.convert("RGB")))
@@ -273,7 +280,11 @@ def _file_to_ocr_images(filepath: str) -> List[Image.Image]:
             from pdf2image import convert_from_path
 
             pdf_path = Path(tmp_dir) / f"{path.stem}.pdf"
-            docx2pdf_convert(str(path), str(pdf_path))
+            try:
+                docx2pdf_convert(str(path), str(pdf_path))
+            except Exception as e:
+                logger.error(f"docx2pdf conversion failed: {e}")
+                raise ValueError("docx2pdf conversion is unsupported on this server. Please upload a PDF or image instead.")
             images = [img.convert("RGB") for img in convert_from_path(str(pdf_path), dpi=220, first_page=1, last_page=1)]
         finally:
             shutil.rmtree(tmp_dir, ignore_errors=True)

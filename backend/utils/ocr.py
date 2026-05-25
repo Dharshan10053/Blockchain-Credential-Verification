@@ -28,6 +28,9 @@ def _ocr_image(filepath: str) -> str:
     import pytesseract
     from PIL import Image
 
+    if os.name == 'nt':
+        pytesseract.pytesseract.tesseract_cmd = r'C:\Program Files\Tesseract-OCR\tesseract.exe'
+
     img = Image.open(filepath)
     # Pre-process: convert to greyscale, increase DPI hint
     img = img.convert("L")

@@ -1,0 +1,113 @@
+{% extends "base.html" %}
+{% block title %}Privacy Policy{% endblock %}
+
+{% block content %}
+<div class="container page-wrap">
+  <div style="max-width:680px;margin:0 auto;padding:48px 0 64px;">
+
+    <div class="section-label" style="margin-bottom:12px;">Legal</div>
+    <h1 style="font-size:1.75rem;font-weight:700;letter-spacing:-.4px;margin-bottom:8px;">Privacy Policy</h1>
+    <p style="font-size:14px;color:var(--text-muted);margin-bottom:40px;">
+      Last updated: June 2026
+    </p>
+
+    <!-- What we collect -->
+    <div style="margin-bottom:32px;">
+      <h2 style="font-size:1.05rem;font-weight:700;margin-bottom:10px;color:var(--text-mid);">
+        What Certificate Metadata We Collect
+      </h2>
+      <p style="font-size:14px;color:var(--text-muted);line-height:1.75;margin-bottom:10px;">
+        When you upload a certificate for issuance or verification, our system extracts and may store the following metadata:
+      </p>
+      <ul style="font-size:14px;color:var(--text-muted);line-height:2;padding-left:20px;">
+        <li>Recipient name (as printed on the certificate)</li>
+        <li>Course or programme title</li>
+        <li>Issuing authority or organisation</li>
+        <li>Certificate issue date</li>
+        <li>Certificate ID or credential number (if present)</li>
+        <li>A SHA-256 cryptographic hash derived from the above fields</li>
+      </ul>
+      <p style="font-size:14px;color:var(--text-muted);line-height:1.75;margin-top:10px;">
+        We do <strong style="color:var(--text-mid);">not</strong> collect financial information, government IDs, login credentials, or biometric data.
+      </p>
+    </div>
+
+    <!-- Why -->
+    <div style="margin-bottom:32px;">
+      <h2 style="font-size:1.05rem;font-weight:700;margin-bottom:10px;color:var(--text-mid);">
+        Why We Collect It
+      </h2>
+      <p style="font-size:14px;color:var(--text-muted);line-height:1.75;">
+        Extracted metadata is used exclusively to:
+      </p>
+      <ul style="font-size:14px;color:var(--text-muted);line-height:2;padding-left:20px;">
+        <li>Generate a deterministic cryptographic hash that uniquely identifies the certificate</li>
+        <li>Record that hash on the blockchain ledger so future verification is possible</li>
+        <li>Allow third parties (employers, institutions) to verify a certificate's authenticity via QR code or verification link</li>
+      </ul>
+      <p style="font-size:14px;color:var(--text-muted);line-height:1.75;margin-top:10px;">
+        Data is never used for marketing, profiling, advertising, or sold to any third party.
+      </p>
+    </div>
+
+    <!-- File handling -->
+    <div style="margin-bottom:32px;padding:16px;background:var(--bg);border:1px solid var(--border);border-radius:var(--radius-sm);">
+      <h2 style="font-size:1.05rem;font-weight:700;margin-bottom:10px;color:var(--text-mid);">
+        Uploaded Files Are Deleted Immediately After Processing
+      </h2>
+      <p style="font-size:14px;color:var(--text-muted);line-height:1.75;">
+        Your original certificate file (image, PDF, or DOCX) is saved to a temporary server location solely for the duration of the extraction process.
+        Once extraction is complete — whether successful or not — the file is permanently deleted from our server.
+        We do <strong style="color:var(--text-mid);">not</strong> retain, archive, or transmit your original document.
+        Only the extracted metadata listed above is kept.
+      </p>
+    </div>
+
+    <!-- How verification works -->
+    <div style="margin-bottom:32px;">
+      <h2 style="font-size:1.05rem;font-weight:700;margin-bottom:10px;color:var(--text-mid);">
+        How Verification Works
+      </h2>
+      <p style="font-size:14px;color:var(--text-muted);line-height:1.75;">
+        When a certificate is issued, its extracted metadata is hashed using SHA-256 and recorded as an immutable block on our local blockchain ledger.
+        When a certificate is later submitted for verification, the same extraction and hashing process is applied and the resulting hash is compared against the ledger.
+        A match confirms the certificate's authenticity.
+      </p>
+      <p style="font-size:14px;color:var(--text-muted);line-height:1.75;margin-top:10px;">
+        Verification links and QR codes point to a public URL that displays the verification result for a specific token.
+        These links do not expose personal data beyond what was originally submitted and recorded.
+      </p>
+    </div>
+
+    <!-- Data retention -->
+    <div style="margin-bottom:32px;">
+      <h2 style="font-size:1.05rem;font-weight:700;margin-bottom:10px;color:var(--text-mid);">
+        Data Retention
+      </h2>
+      <p style="font-size:14px;color:var(--text-muted);line-height:1.75;">
+        Because the blockchain ledger is append-only and immutable by design, records stored on the chain are retained indefinitely.
+        Database records in our verification index are also retained indefinitely to support future verification requests.
+        If you require removal of your data, please contact us using the details below and we will assess your request.
+      </p>
+    </div>
+
+    <!-- Contact -->
+    <div style="margin-bottom:0;padding:16px;background:var(--bg);border:1px solid var(--border);border-radius:var(--radius-sm);">
+      <h2 style="font-size:1.05rem;font-weight:700;margin-bottom:10px;color:var(--text-mid);">
+        Contact
+      </h2>
+      <p style="font-size:14px;color:var(--text-muted);line-height:1.75;">
+        For data removal requests, privacy questions, or concerns about how your certificate data is handled, contact the system administrator at:
+      </p>
+      <p style="font-size:14px;color:var(--text-mid);margin-top:8px;font-weight:500;">
+        CertAuth — Smart Certificate Authentication System
+      </p>
+      <p style="font-size:13px;color:var(--text-muted);">
+        This application is deployed on Render. For abuse or privacy complaints, you may also contact
+        <a href="https://render.com/privacy" target="_blank" rel="noopener noreferrer" style="color:var(--blue);text-decoration:none;">Render's privacy team</a>.
+      </p>
+    </div>
+
+  </div>
+</div>
+{% endblock %}

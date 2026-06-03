@@ -102,37 +102,46 @@ def _process_upload(file) -> tuple[dict, str, str]:
     filename = secure_filename(file.filename)
     filepath = os.path.join(app.config["UPLOAD_FOLDER"], filename)
     file.save(filepath)
-    details = extract_details(filepath)
-    
-    # Use new hash service for certificate hashing
-    from services.hash_service import generate_certificate_hash
-    from services.ledger_service import ledger_service
-    from services.verification_service import verify_certificate
-    
-    # Validate extraction before generating hash
-    if not details or not details.get("certificate_id"):
-        raise ValueError("Extraction failed — cannot generate hash from empty data")
-    
-    h = generate_certificate_hash(details)
-    
-    # Extract certificate ID from details (do not generate fake ID)
-    certificate_id = details.get("certificate_id")
-    
-    if ledger_service.certificate_exists(certificate_id):
-        # Certificate exists - verify it
-        stored_hash = ledger_service.get_stored_hash(certificate_id)
-        verification_result = verify_certificate(h, stored_hash, details)
-        status = verification_result["status"]  # "VALID", "PARTIALLY_MATCHED", or "FAKE"
-        details["verification_result"] = verification_result # Store it to use in the route
-        logger.info(f"Verification result for {certificate_id}: {status}")
-    else:
-        # New certificate - store it
-        ledger_service.store_certificate(certificate_id, h)
-        status = "NEWLY REGISTERED"
-        logger.info(f"New certificate registered: {certificate_id}")
-    
-    logger.info(f"Processed upload: {filename}, hash: {h[:16]}..., status: {status}")
-    return details, h, status
+    try:
+        details = extract_details(filepath)
+        
+        # Use new hash service for certificate hashing
+        from services.hash_service import generate_certificate_hash
+        from services.ledger_service import ledger_service
+        from services.verification_service import verify_certificate
+        
+        # Validate extraction before generating hash
+        if not details or not details.get("certificate_id"):
+            raise ValueError("Extraction failed — cannot generate hash from empty data")
+        
+        h = generate_certificate_hash(details)
+        
+        # Extract certificate ID from details (do not generate fake ID)
+        certificate_id = details.get("certificate_id")
+        
+        if ledger_service.certificate_exists(certificate_id):
+            # Certificate exists - verify it
+            stored_hash = ledger_service.get_stored_hash(certificate_id)
+            verification_result = verify_certificate(h, stored_hash, details)
+            status = verification_result["status"]  # "VALID", "PARTIALLY_MATCHED", or "FAKE"
+            details["verification_result"] = verification_result # Store it to use in the route
+            logger.info(f"Verification result for {certificate_id}: {status}")
+        else:
+            # New certificate - store it
+            ledger_service.store_certificate(certificate_id, h)
+            status = "NEWLY REGISTERED"
+            logger.info(f"New certificate registered: {certificate_id}")
+        
+        logger.info(f"Processed upload: {filename}, hash: {h[:16]}..., status: {status}")
+        return details, h, status
+    finally:
+        # Always delete the uploaded file after processing — never retain user documents on disk.
+        try:
+            if os.path.exists(filepath):
+                os.remove(filepath)
+                logger.info(f"Deleted uploaded file after processing: {filename}")
+        except Exception as _cleanup_err:
+            logger.warning(f"Failed to delete uploaded file {filepath}: {_cleanup_err}")
 
 
 def _build_result(details, cert_hash, verification, action) -> dict:
@@ -448,11 +457,22 @@ def download_report(cert_hash: str):
 
 @app.route("/ledger")
 def ledger():
+    # In production, require ADMIN_API_KEY via ?admin_key= query parameter.
+    if os.environ.get("FLASK_ENV", "production").lower() != "development":
+        admin_key = request.args.get("admin_key", "").strip()
+        expected_key = os.environ.get("ADMIN_API_KEY", "")
+        if not expected_key or admin_key != expected_key:
+            abort(403)
     if not SERVICES_OK:
         return render_template("ledger.html", records=[], chain_valid=False)
     records     = get_all_certificates()
     chain_valid = blockchain.is_valid()
     return render_template("ledger.html", records=records, chain_valid=chain_valid)
+
+
+@app.route("/privacy")
+def privacy():
+    return render_template("privacy.html")
 
 
 # ---------------------------------------------------------------------------
@@ -577,10 +597,19 @@ def api_export():
 
 @app.route("/api/blockchain")
 def api_blockchain():
+    admin_key = request.headers.get("X-Admin-Key", "")
+    expected_key = os.environ.get("ADMIN_API_KEY", "")
+    if expected_key and admin_key == expected_key:
+        # Admin request: return full chain data
+        return jsonify({
+            "blocks": len(blockchain.chain),
+            "valid":  blockchain.is_valid(),
+            "chain":  blockchain.chain,
+        })
+    # Public request: return health stats only — no personal data exposed
     return jsonify({
         "blocks": len(blockchain.chain),
         "valid":  blockchain.is_valid(),
-        "chain":  blockchain.chain,
     })
 
 

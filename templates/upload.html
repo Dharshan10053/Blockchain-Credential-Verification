@@ -118,16 +118,17 @@
       </form>
     </div>
 
-    <!-- Info note -->
     <div style="margin-top:16px;padding:14px 16px;background:var(--bg);border:1px solid var(--border);border-radius:var(--radius-sm);font-size:12px;color:var(--text-muted);">
       {% if action == "issue" %}
         <strong style="color:var(--text-mid)">How issuance works:</strong>
-        We extract text via OCR, detect the issuing authority using a position + keyword scoring system,
-        generate a SHA-256 hash, and append a new block to the blockchain ledger.
+        CertAuth automatically extracts certificate details from your uploaded document,
+        generates a cryptographic fingerprint, and records it permanently on the blockchain ledger.
+        A unique QR code and verification link are issued for future authenticity checks.
       {% else %}
         <strong style="color:var(--text-mid)">How verification works:</strong>
-        We re-extract and re-hash the uploaded certificate, then compare against all blockchain records.
-        Fuzzy matching (≥ 82% similarity) catches minor OCR noise automatically.
+        CertAuth re-processes your uploaded certificate, generates its cryptographic fingerprint,
+        and compares it against the blockchain ledger. Certificates that match are confirmed authentic;
+        those that don't are flagged with the appropriate status and confidence level.
       {% endif %}
     </div>
 

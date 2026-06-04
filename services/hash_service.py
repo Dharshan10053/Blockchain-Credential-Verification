@@ -57,8 +57,7 @@ def generate_certificate_hash(data: dict) -> str:
         hash_object = hashlib.sha256(json_string.encode('utf-8'))
         hash_hex = hash_object.hexdigest()
         
-        logger.info(f"Generated certificate hash: {hash_hex[:16]}... from {len(json_string)} chars")
-        logger.debug(f"Hash payload: {payload}")
+        logger.info("Generated certificate hash: %s... from %d chars", hash_hex[:16], len(json_string))
         return hash_hex
         
     except Exception as e:

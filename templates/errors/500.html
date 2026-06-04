@@ -1,0 +1,22 @@
+{% extends "base.html" %}
+{% block title %}500 Internal Server Error{% endblock %}
+
+{% block content %}
+<div class="container page-wrap">
+  <div class="error-page fade-up">
+    <div class="error-code">500</div>
+    <div class="error-icon" style="color: var(--red);">
+      <svg width="48" height="48" fill="none" stroke="currentColor" stroke-width="1.5" viewBox="0 0 24 24">
+        <path d="M10.29 3.86L1.82 18a2 2 0 001.71 3h16.94a2 2 0 001.71-3L13.71 3.86a2 2 0 00-3.42 0z"/>
+        <path d="M12 9v4M12 17h.01" stroke-linecap="round"/>
+      </svg>
+    </div>
+    <h1>Internal Server Error</h1>
+    <p>Something went wrong on our end. Our team has been notified. Please try again in a moment, or contact support if the problem persists.</p>
+    <div class="error-actions">
+      <a href="{{ url_for('home') }}" class="btn btn-primary">Go Home</a>
+      <a href="{{ url_for('verify') }}" class="btn btn-secondary">Verify Certificate</a>
+    </div>
+  </div>
+</div>
+{% endblock %}

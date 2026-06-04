@@ -1,0 +1,22 @@
+{% extends "base.html" %}
+{% block title %}429 Too Many Requests{% endblock %}
+
+{% block content %}
+<div class="container page-wrap">
+  <div class="error-page fade-up">
+    <div class="error-code">429</div>
+    <div class="error-icon" style="color: var(--yellow);">
+      <svg width="48" height="48" fill="none" stroke="currentColor" stroke-width="1.5" viewBox="0 0 24 24">
+        <circle cx="12" cy="12" r="9"/>
+        <path d="M12 6v6l4 2" stroke-linecap="round" stroke-linejoin="round"/>
+      </svg>
+    </div>
+    <h1>Too Many Requests</h1>
+    <p>You've sent too many requests in a short period. Please wait a moment before trying again. Rate limits protect the platform for all users.</p>
+    <div class="error-actions">
+      <a href="{{ url_for('home') }}" class="btn btn-primary">Go Home</a>
+      <a href="{{ url_for('verify') }}" class="btn btn-secondary">Try Again Later</a>
+    </div>
+  </div>
+</div>
+{% endblock %}

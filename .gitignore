@@ -34,15 +34,19 @@ env/
 ENV/
 env.bak/
 venv.bak/
+.venv/
 
-# Databases
+# Databases — never commit live data with PII
 *.db
 *.sqlite3
-# certificates.db 
 
-# Blockchain data
-# Provide a sample_data/blockchain_sample.json instead of tracking the live ledger
-# blockchain.json
+# Blockchain ledger — contains all issued certificate metadata (PII)
+# Use sample_data/blockchain_sample.json for development demos instead
+blockchain.json
+
+# Ledger service data
+data/
+data/ledger.json
 
 # IDEs
 .idea/
@@ -50,9 +54,11 @@ venv.bak/
 *.swp
 *.swo
 
-# Project specific
+# Project specific — uploads and generated reports contain user data
 uploads/*
 !uploads/.gitkeep
 reports/*
 !reports/.gitkeep
+qrcodes/*
+!qrcodes/.gitkeep
 archive/

@@ -3,6 +3,9 @@ import sys
 
 sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))
 
+# Set FLASK_ENV to development for testing
+os.environ["FLASK_ENV"] = "development"
+
 from app import app
 from backend.database.db import init_db, upsert_certificate
 
@@ -18,7 +21,7 @@ def test_fallbacks():
         "issuing_authority": "Tech University",
         "date": "2026-05-24"
     }
-    upsert_certificate(mock_hash_1, details_1, action="ISSUE")
+    token_1 = upsert_certificate(mock_hash_1, details_1, action="ISSUE")
     
     # Test Case 2: Legacy Entry missing 'course' but having 'certificate_title'
     mock_hash_2 = "hash_legacy"
@@ -29,7 +32,7 @@ def test_fallbacks():
         "issuer": "Global Institute",
         # date missing intentionally
     }
-    upsert_certificate(mock_hash_2, details_2, action="ISSUE")
+    token_2 = upsert_certificate(mock_hash_2, details_2, action="ISSUE")
     
     # Test Case 3: Fuzzy OCR fallback
     mock_hash_3 = "hash_ocr"
@@ -40,19 +43,21 @@ def test_fallbacks():
         "institution": "OCR Academy",
         "issued_on": "May 2026"
     }
-    upsert_certificate(mock_hash_3, details_3, action="ISSUE")
+    token_3 = upsert_certificate(mock_hash_3, details_3, action="ISSUE")
     
-    hashes = [mock_hash_1, mock_hash_2, mock_hash_3]
+    cases = [
+        (mock_hash_1, token_1),
+        (mock_hash_2, token_2),
+        (mock_hash_3, token_3)
+    ]
     
     print("Testing /report endpoints for fallback correctness...")
     with app.test_client() as client:
-        for h in hashes:
+        for h, token in cases:
             print(f"\n--- Fetching PDF for {h} ---")
-            response = client.get(f'/report/{h}')
-            if response.status_code == 200:
-                print(f"Success! PDF generated.")
-            else:
-                print(f"Failed! Status: {response.status_code}")
+            response = client.get(f'/report/{h}?token={token}')
+            assert response.status_code == 200
+            print(f"Success! PDF generated.")
 
 if __name__ == '__main__':
     test_fallbacks()

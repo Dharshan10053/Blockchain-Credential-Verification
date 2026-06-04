@@ -5,16 +5,11 @@ import time
 
 sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))
 
+# Set FLASK_ENV to development for testing
+os.environ["FLASK_ENV"] = "development"
+
 from app import app
 from backend.database.db import get_all_certificates, archive_old_logs
-
-def worker_verify(client, results, idx):
-    try:
-        # We will hit the limit pretty quick (20 per min)
-        response = client.post('/api/verify')
-        results[idx] = response.status_code
-    except Exception as e:
-        results[idx] = str(e)
 
 def run_stress_test():
     print("--- Starting Phase 3 E2E Stress Test ---")
@@ -27,15 +22,14 @@ def run_stress_test():
     with app.test_client() as client:
         # 1. Test Rate Limiter
         print("Testing rate limiter on /api/verify...")
-        threads = []
         results = {}
         for i in range(25):
-            t = threading.Thread(target=worker_verify, args=(client, results, i))
-            threads.append(t)
-            t.start()
-            
-        for t in threads:
-            t.join()
+            try:
+                # We will hit the limit pretty quick (20 per min)
+                response = client.post('/api/verify')
+                results[i] = response.status_code
+            except Exception as e:
+                results[i] = str(e)
             
         # Analyze results (some should be 400 because no file, some should be 429 because of limit)
         status_counts = {}

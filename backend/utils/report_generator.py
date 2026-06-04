@@ -5,7 +5,8 @@ from __future__ import annotations
 import logging
 import os
 import io
-from datetime import datetime
+import tempfile
+from datetime import datetime, timezone
 
 logger = logging.getLogger(__name__)
 
@@ -29,9 +30,11 @@ def generate_report(result: dict, base_url: str = None) -> str:
 
         os.makedirs(_REPORT_DIR, exist_ok=True)
         cert_hash = result.get("hash", "unknown")
-        filename = f"report_{cert_hash[:12]}.pdf"
-        filepath = os.path.join(_REPORT_DIR, filename)
+        # Use a tempfile so PDFs are not retained on disk indefinitely.
+        # The caller (app.py) is responsible for deleting the file after sending.
+        fd, filepath = tempfile.mkstemp(prefix=f"certauth_report_{cert_hash[:12]}_", suffix=".pdf", dir=_REPORT_DIR)
 
+        os.close(fd)  # close the OS file descriptor; ReportLab will open the path
         width, height = A4
         c = canvas.Canvas(filepath, pagesize=A4)
         c.setTitle(f"Verification Report - {cert_hash[:12]}")
@@ -47,7 +50,7 @@ def generate_report(result: dict, base_url: str = None) -> str:
         
         c.setFillColor(colors.HexColor("#9CA3AF"))
         c.setFont("Helvetica", 10)
-        c.drawString(2*cm, height - 3.7*cm, f"Generated: {datetime.now().strftime('%B %d, %Y - %H:%M UTC')}")
+        c.drawString(2*cm, height - 3.7*cm, f"Generated: {datetime.now(timezone.utc).strftime('%B %d, %Y - %H:%M UTC')}")
 
         # Accent Line
         c.setStrokeColor(colors.HexColor("#06B6D4"))
@@ -82,9 +85,6 @@ def generate_report(result: dict, base_url: str = None) -> str:
         c.setFillColor(colors.HexColor("#F8FAFC"))
         c.setFont("Helvetica-Bold", 14)
         c.drawString(2*cm, box_y - 1.5*cm, "Certificate Details")
-
-        import json
-        logger.debug(f"FULL PDF GENERATOR PAYLOAD:\n{json.dumps(result, indent=2)}")
 
         # Centralized normalized fallback resolver exactly as requested
         course_title = result.get("course") or result.get("course_title") or result.get("course_name") or result.get("title") or result.get("certificate_title") or "Not Extracted"

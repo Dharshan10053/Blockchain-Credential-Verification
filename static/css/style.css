@@ -1224,16 +1224,6 @@ footer {
 }
 
 
-
-/* ── Layout & Typography Utilities ────────────────────────────── */
-.truncate-multiline {
-  display: -webkit-box;
-  -webkit-line-clamp: 3;
-  -webkit-box-orient: vertical;
-  overflow: hidden;
-  text-overflow: ellipsis;
-}
-
 /* ── Print Styles ────────────────────────────────────────── */
 @media print {
   body {
@@ -1263,4 +1253,59 @@ footer {
     -webkit-print-color-adjust: exact;
     print-color-adjust: exact;
   }
+}
+
+/* ── Custom Error Pages ───────────────────────────────────── */
+.error-page {
+
+  max-width: 520px;
+  margin: 80px auto;
+  text-align: center;
+  padding: 48px 32px;
+  background: rgba(15, 23, 42, 0.5);
+  backdrop-filter: blur(20px);
+  -webkit-backdrop-filter: blur(20px);
+  border: 1px solid rgba(255, 255, 255, 0.07);
+  border-radius: var(--radius-lg);
+  box-shadow: 0 24px 48px -12px rgba(0, 0, 0, 0.7);
+}
+
+.error-code {
+  font-size: 6rem;
+  font-weight: 700;
+  letter-spacing: -4px;
+  background: linear-gradient(135deg, var(--blue), var(--cyan));
+  -webkit-background-clip: text;
+  -webkit-text-fill-color: transparent;
+  background-clip: text;
+  line-height: 1;
+  margin-bottom: 16px;
+}
+
+.error-icon {
+  color: var(--text-faint);
+  margin-bottom: 20px;
+  display: flex;
+  justify-content: center;
+}
+
+.error-page h1 {
+  font-size: 1.5rem;
+  font-weight: 700;
+  letter-spacing: -0.4px;
+  margin-bottom: 12px;
+}
+
+.error-page p {
+  font-size: 14px;
+  color: var(--text-muted);
+  line-height: 1.65;
+  margin-bottom: 32px;
+}
+
+.error-actions {
+  display: flex;
+  gap: 12px;
+  justify-content: center;
+  flex-wrap: wrap;
 }

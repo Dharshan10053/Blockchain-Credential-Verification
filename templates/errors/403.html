@@ -1,0 +1,22 @@
+{% extends "base.html" %}
+{% block title %}403 Access Denied{% endblock %}
+
+{% block content %}
+<div class="container page-wrap">
+  <div class="error-page fade-up">
+    <div class="error-code">403</div>
+    <div class="error-icon" style="color: var(--red);">
+      <svg width="48" height="48" fill="none" stroke="currentColor" stroke-width="1.5" viewBox="0 0 24 24">
+        <rect x="5" y="11" width="14" height="10" rx="2" ry="2"/>
+        <path d="M8 11V7a4 4 0 018 0v4" stroke-linecap="round"/>
+      </svg>
+    </div>
+    <h1>Access Denied</h1>
+    <p>You don't have permission to access this resource. If you believe this is an error, please verify your credentials and try again.</p>
+    <div class="error-actions">
+      <a href="{{ url_for('home') }}" class="btn btn-primary">Go Home</a>
+      <a href="{{ url_for('verify') }}" class="btn btn-secondary">Verify Certificate</a>
+    </div>
+  </div>
+</div>
+{% endblock %}

@@ -1,0 +1,21 @@
+{% extends "base.html" %}
+{% block title %}503 Service Unavailable{% endblock %}
+
+{% block content %}
+<div class="container page-wrap">
+  <div class="error-page fade-up">
+    <div class="error-code">503</div>
+    <div class="error-icon">
+      <svg width="48" height="48" fill="none" stroke="currentColor" stroke-width="1.5" viewBox="0 0 24 24">
+        <path d="M12 2L2 7l10 5 10-5-10-5zM2 17l10 5 10-5M2 12l10 5 10-5"/>
+      </svg>
+    </div>
+    <h1>Service Unavailable</h1>
+    <p>The authentication service is temporarily unavailable. Backend services may be starting up or undergoing maintenance. Please try again in a minute.</p>
+    <div class="error-actions">
+      <a href="{{ url_for('home') }}" class="btn btn-primary">Go Home</a>
+      <a href="javascript:location.reload()" class="btn btn-secondary">Retry</a>
+    </div>
+  </div>
+</div>
+{% endblock %}

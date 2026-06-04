@@ -55,7 +55,7 @@
             <span class="mono">{{ rec.cert_hash[:16] if rec.cert_hash else '—' }}…</span>
           </td>
           <td>
-            <a href="/report/{{ rec.cert_hash }}" class="btn btn-ghost" style="font-size:12px;padding:5px 10px" title="Download PDF report">
+            <a href="/report/{{ rec.cert_hash }}?token={{ rec.verification_token }}" class="btn btn-ghost" style="font-size:12px;padding:5px 10px" title="Download PDF report">
               <svg width="13" height="13" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path d="M21 15v4a2 2 0 01-2 2H5a2 2 0 01-2-2v-4" stroke-linecap="round"/><polyline points="7 10 12 15 17 10" stroke-linecap="round" stroke-linejoin="round"/><line x1="12" y1="15" x2="12" y2="3" stroke-linecap="round"/></svg>
             </a>
           </td>

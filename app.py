@@ -147,7 +147,7 @@ def _validate_token(token: str) -> bool:
     return bool(_TOKEN_RE.match(token))
 
 
-def _process_upload(file) -> tuple[dict, str, str]:
+def _process_upload(file, mode: str = "issue") -> tuple[dict, str, str]:
     filename = secure_filename(file.filename)
     filepath = os.path.join(app.config["UPLOAD_FOLDER"], filename)
     file.save(filepath)
@@ -176,10 +176,15 @@ def _process_upload(file) -> tuple[dict, str, str]:
             details["verification_result"] = verification_result
             logger.info("Verification result for cert_id=%s: status=%s", certificate_id, status)
         else:
-            # New certificate - store it
-            ledger_service.store_certificate(certificate_id, h)
-            status = "NEWLY REGISTERED"
-            logger.info("New certificate registered: cert_id=%s", certificate_id)
+            if mode == "issue":
+                # New certificate - store it (issuance only)
+                ledger_service.store_certificate(certificate_id, h)
+                status = "NEWLY REGISTERED"
+                logger.info("New certificate registered: cert_id=%s", certificate_id)
+            else:
+                # Verification mode - do NOT register unknown certificates
+                status = "NOT REGISTERED"
+                logger.info("Certificate not found in ledger (verify mode): cert_id=%s", certificate_id)
 
         logger.info("Processed upload: filename=%s, hash_prefix=%s, status=%s", filename, h[:16], status)
         return details, h, status
@@ -235,6 +240,15 @@ def _build_verification_dict(verification_status: str, details: dict) -> dict:
             "message":          "Certificate successfully registered and verified.",
             "explanation":      "Extracted successfully and added to the blockchain ledger.",
             "confidence_score": details.get("confidence_score", 0),
+        }
+    elif verification_status == "NOT REGISTERED":
+        return {
+            "status":           "NOT_REGISTERED",
+            "label":            "✗ Not Registered",
+            "color":            "red",
+            "message":          "Certificate not found in any trusted registry.",
+            "explanation":      "This certificate has not been issued through the system. It cannot be verified.",
+            "confidence_score": 0.0,
         }
     elif verification_status == "VALID":
         return {
@@ -394,10 +408,14 @@ def verify():
         return render_template("upload.html", action="verify",
                                error="Please upload a valid file (PNG, JPG, PDF, DOCX).")
     try:
-        details, cert_hash, verification_status = _process_upload(file)
+        details, cert_hash, verification_status = _process_upload(file, mode="verify")
 
         verification = _build_verification_dict(verification_status, details)
-        token  = upsert_certificate(cert_hash, details, action="VERIFY")
+        # Only write to DB if the certificate is already trusted (found in ledger/blockchain)
+        if verification_status in ("VALID", "PARTIALLY_MATCHED", "FAKE"):
+            token = upsert_certificate(cert_hash, details, action="VERIFY")
+        else:
+            token = None
         result = _build_result(details, cert_hash, verification, "VERIFY")
         result["token"] = token
 
@@ -648,10 +666,12 @@ def api_verify():
     if not file or not allowed_file(file.filename):
         return jsonify({"error": "Invalid or missing file"}), 400
     try:
-        details, cert_hash, verification_status = _process_upload(file)
+        details, cert_hash, verification_status = _process_upload(file, mode="verify")
 
         verification = _build_verification_dict(verification_status, details)
-        upsert_certificate(cert_hash, details, action="VERIFY")
+        # Only write to DB if the certificate is already trusted
+        if verification_status in ("VALID", "PARTIALLY_MATCHED", "FAKE"):
+            upsert_certificate(cert_hash, details, action="VERIFY")
         result = _build_result(details, cert_hash, verification, "VERIFY")
         return jsonify(result)
     except Exception as e:

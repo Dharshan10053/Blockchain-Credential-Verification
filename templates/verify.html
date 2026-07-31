@@ -1,0 +1,14 @@
+{% extends "base.html" %}
+{% block content %}
+
+<div class="form-container">
+    <h2>Verify Certificate</h2>
+    <form method="POST" enctype="multipart/form-data">
+        <div class="file-upload">
+            <input type="file" name="certificate" required>
+        </div>
+        <button type="submit" class="btn secondary">Verify Now</button>
+    </form>
+</div>
+
+{% endblock %}

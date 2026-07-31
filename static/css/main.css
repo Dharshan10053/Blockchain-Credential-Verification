@@ -1,0 +1,83 @@
+*{
+margin-bottom:30px;
+}
+
+.btn{
+padding:12px 30px;
+border-radius:30px;
+text-decoration:none;
+font-weight:600;
+margin:10px;
+transition:0.3s ease;
+display:inline-block;
+}
+
+.primary{
+background:#00f5ff;
+color:#000;
+}
+
+.secondary{
+background:#ff00c8;
+color:#fff;
+}
+
+.btn:hover{
+transform:translateY(-4px);
+box-shadow:0 10px 25px rgba(0,0,0,0.4);
+}
+
+/* Features */
+.features{
+display:flex;
+justify-content:center;
+gap:40px;
+padding:60px;
+flex-wrap:wrap;
+}
+
+.feature-card{
+background:rgba(255,255,255,0.05);
+padding:30px;
+border-radius:20px;
+width:280px;
+text-align:center;
+backdrop-filter:blur(15px);
+transition:0.4s ease;
+}
+
+.feature-card:hover{
+transform:translateY(-10px) scale(1.05);
+}
+
+/* Glass Card */
+.glass-card{
+max-width:500px;
+margin:80px auto;
+padding:40px;
+background:rgba(255,255,255,0.08);
+border-radius:20px;
+backdrop-filter:blur(15px);
+text-align:center;
+}
+
+.glass-card input{
+width:100%;
+padding:12px;
+margin:20px 0;
+border-radius:10px;
+border:none;
+}
+
+.hash-box{
+margin-top:20px;
+}
+
+.hash-value{
+background:#000;
+padding:15px;
+border-radius:10px;
+word-break:break-all;
+font-size:0.8rem;
+color:#00f5ff;
+}

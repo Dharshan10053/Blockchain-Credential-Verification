@@ -1,0 +1,23 @@
+# Python
+__pycache__/
+*.pyc
+*.pyo
+
+# Virtual environments
+venv/
+myenv/
+
+# User uploads
+uploads/
+
+# Logs
+*.log
+
+# Temporary files
+cursor_access_test.txt
+
+# Environment secrets
+.env
+
+# Graphify generated cache
+graphify-out/cache/

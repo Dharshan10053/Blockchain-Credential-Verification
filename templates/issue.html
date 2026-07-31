@@ -1,0 +1,17 @@
+{% extends "base.html" %}
+{% block content %}
+
+<div class="form-container">
+    <h2>Issue New Certificate</h2>
+    <form method="POST" enctype="multipart/form-data" action="{{ url_for('issue') }}">
+        <!-- File input for certificate (PDF + images) -->
+        <div class="file-upload">
+            <input type="file" name="certificate" accept=".pdf,.png,.jpg,.jpeg,image/*,application/pdf" required>
+        </div>
+
+        <!-- Submit button -->
+        <button type="submit" class="btn primary">Generate & Store</button>
+    </form>
+</div>
+
+{% endblock %}

@@ -1,0 +1,63 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>CertiChain | Smart Verification</title>
+
+<!-- Google Font -->
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;600;700;800&display=swap" rel="stylesheet">
+
+<!-- Styles -->
+<link rel="stylesheet" href="{{ url_for('static', filename='css/style.css') }}">
+<link rel="stylesheet" href="{{ url_for('static', filename='css/animations.css') }}">
+<link rel="stylesheet" href="{{ url_for('static', filename='css/main.css') }}">
+
+</head>
+
+<body>
+
+<!-- Loader -->
+<div id="loader">
+    <div class="loader-container">
+        <div class="blockchain-loader">
+            <div class="ring"></div>
+            <div class="ring delay"></div>
+            <div class="core"></div>
+        </div>
+        <h2 class="loading-text">Securing Trust...</h2>
+    </div>
+</div>
+
+<!-- Navbar -->
+<nav class="navbar">
+    <div class="logo">🔐 CertiChain</div>
+    <ul>
+        <li><a href="/">Home</a></li>
+        <li><a href="/issue">Issue</a></li>
+        <li><a href="/verify">Verify</a></li>
+    </ul>
+</nav>
+
+<!-- Page Content -->
+<div class="content">
+    {% block content %}{% endblock %}
+</div>
+
+<!-- Loader Script -->
+<script>
+window.addEventListener("load", function () {
+    const loader = document.getElementById("loader");
+
+    if(loader){
+        loader.style.opacity = "0";
+
+        setTimeout(function(){
+            loader.style.display = "none";
+        }, 600);
+    }
+});
+</script>
+
+</body>
+</html>

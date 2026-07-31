@@ -1,0 +1,31 @@
+{% extends "base.html" %}
+{% block content %}
+
+<section class="hero">
+    <h1 class="gradient-text">Blockchain Powered Certificate Authentication</h1>
+    <p class="hero-sub">Secure • Tamper‑Proof • AI Driven</p>
+
+    <div class="hero-buttons">
+        <a href="/issue" class="btn primary">Issue Certificate</a>
+        <a href="/verify" class="btn secondary">Verify Certificate</a>
+    </div>
+</section>
+
+<section class="features">
+    <div class="feature-card">
+        <h3>🔒 Immutable Storage</h3>
+        <p>SHA‑256 hashing ensures certificate data cannot be altered once issued.</p>
+    </div>
+
+    <div class="feature-card">
+        <h3>⚡ Instant Verification</h3>
+        <p>Upload a certificate and verify authenticity within seconds.</p>
+    </div>
+
+    <div class="feature-card">
+        <h3>🤖 AI Extraction</h3>
+        <p>OCR intelligently extracts details for automated validation.</p>
+    </div>
+</section>
+
+{% endblock %}

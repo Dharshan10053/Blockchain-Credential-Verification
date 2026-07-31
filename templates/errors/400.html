@@ -1,0 +1,22 @@
+{% extends "base.html" %}
+{% block title %}400 Bad Request{% endblock %}
+
+{% block content %}
+<div class="container page-wrap">
+  <div class="error-page fade-up">
+    <div class="error-code">400</div>
+    <div class="error-icon">
+      <svg width="48" height="48" fill="none" stroke="currentColor" stroke-width="1.5" viewBox="0 0 24 24">
+        <circle cx="12" cy="12" r="9"/>
+        <path d="M12 8v4M12 16h.01" stroke-linecap="round"/>
+      </svg>
+    </div>
+    <h1>Bad Request</h1>
+    <p>The request was malformed or contained an invalid parameter. Please check the URL or form data and try again.</p>
+    <div class="error-actions">
+      <a href="{{ url_for('home') }}" class="btn btn-primary">Go Home</a>
+      <a href="{{ url_for('verify') }}" class="btn btn-secondary">Verify Certificate</a>
+    </div>
+  </div>
+</div>
+{% endblock %}

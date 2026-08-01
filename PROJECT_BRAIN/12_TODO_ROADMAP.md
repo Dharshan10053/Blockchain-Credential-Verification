@@ -17,6 +17,18 @@ This document provides a prioritized roadmap for the Certificate Authentication 
 | **Future** | Enterprise or advanced feature | 6+ months |
 
 ---
+## Architecture Status Update (2026-08-02)
+
+### Decision
+- ✅ `backend/` is approved as the future primary architecture.
+- ✅ `app.py` remains the live application until migration is completed.
+- ✅ Migration will be incremental to avoid regressions and preserve existing functionality.
+
+### Key Findings
+- Three generations of the application exist in the repository.
+- `backend/` provides the most complete enterprise foundation.
+- Duplicate implementations will be consolidated during migration.
+- Gemini AI integration is deferred until after the backend migration.
 
 ## Critical Priority
 
@@ -66,23 +78,32 @@ This document provides a prioritized roadmap for the Certificate Authentication 
 
 ## High Priority
 
-### H1: Integrate Refactored Modules
-**Issue:** `routes/`, `models/`, `utils/`, `config/` exist but are not used by `app.py`.
-**Files:** Multiple
-**Effort:** Weeks
-**Impact:** Reduces code duplication, improves maintainability, enables pattern-based extraction.
+#### H1: Migrate to backend/ Architecture
+**Status:** Approved
+
+**Decision:** The `backend/` directory has been selected as the future primary architecture after a full repository audit.
+
+**Migration Strategy:**
+- Migrate incrementally.
+- Preserve existing functionality.
+- Maintain backward compatibility.
+- Eliminate duplicate implementations only after successful migration.
+- Keep `app.py` as the live compatibility layer until migration is complete.
+**Impact:** Establishes a single enterprise architecture and removes long-term technical debt.
 
 ### H2: Consolidate Blockchain Implementations
 **Issue:** Two blockchain implementations exist (`app.py` simple + `blockchain.py` full).
 **Files:** `app.py`, `blockchain.py`
 **Effort:** Days
 **Impact:** Single, validated blockchain with block structure and chain integrity.
+**Note:** This will be completed as part of the approved backend migration.
 
 ### H3: Consolidate Hashing Implementations
 **Issue:** Two hashing implementations exist (`app.py` non-normalized + `utils/cert_hash.py` canonical).
 **Files:** `app.py`, `utils/cert_hash.py`
 **Effort:** Days
 **Impact:** Canonical hashing ensures consistent hashes across OCR variations.
+**Note:** This will use the canonical hashing implementation from `backend/`.
 
 ### H4: Add File Content Validation
 **Issue:** Only file extension is validated, not content.

@@ -615,8 +615,22 @@ a:hover { text-decoration: underline; }
 
 .alert-error {
   background: var(--red-light);
-  border: 1px solid #FECACA;
-  color: #7F1D1D;
+  border: 1px solid rgba(239, 68, 68, 0.3);
+  color: #FCA5A5;
+}
+.alert-success {
+  background: var(--green-light);
+  border: 1px solid rgba(16, 185, 129, 0.3);
+  color: #6EE7B7;
+}
+
+.alert svg {
+  flex-shrink: 0;
+  margin-top: 1px;
+}
+
+.alert strong {
+  color: var(--text-primary);
 }
 
 /* ── Button Shimmer (Loading) ────────────────────────────── */

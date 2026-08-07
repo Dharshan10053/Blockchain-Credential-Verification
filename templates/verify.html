@@ -1,14 +1,73 @@
 {% extends "base.html" %}
+{% block title %}Verify Certificate{% endblock %}
+
 {% block content %}
+<canvas id="bg-animation"></canvas>
+<div class="container page-wrap">
+  <div class="upload-page">
 
-<div class="form-container">
-    <h2>Verify Certificate</h2>
-    <form method="POST" enctype="multipart/form-data">
-        <div class="file-upload">
-            <input type="file" name="certificate" required>
+    <div class="section-label fade-up">Verify Certificate</div>
+    <div class="upload-header fade-up fade-up-1">
+      <h1>Verify Certificate</h1>
+      <p>Upload any certificate and we'll check it against the blockchain ledger. Smart fuzzy matching handles minor OCR differences automatically.</p>
+    </div>
+
+    {% with messages = get_flashed_messages(with_categories=true) %}
+      {% if messages %}
+        {% for category, message in messages %}
+          <div class="alert {{ 'alert-error' if category == 'error' else 'alert-success' }} fade-up">
+            {% if category == 'error' %}
+            <svg width="16" height="16" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><circle cx="12" cy="12" r="9"/><path d="M12 8v5M12 16h.01" stroke-linecap="round"/></svg>
+            {% else %}
+            <svg width="16" height="16" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path d="M9 12l2 2 4-4" stroke-linecap="round" stroke-linejoin="round"/><circle cx="12" cy="12" r="9"/></svg>
+            {% endif %}
+            <span>{{ message }}</span>
+          </div>
+        {% endfor %}
+      {% endif %}
+    {% endwith %}
+
+    <div class="card card-padded fade-up fade-up-2">
+      <form method="POST" enctype="multipart/form-data" class="upload-form">
+
+        <div class="upload-zone">
+          <input type="file" name="certificate" required>
+          <div class="upload-icon">
+            <svg width="22" height="22" fill="none" stroke="currentColor" stroke-width="1.8" viewBox="0 0 24 24">
+              <path d="M9 12l2 2 4-4" stroke-linecap="round" stroke-linejoin="round"/>
+              <path d="M12 3a9 9 0 100 18A9 9 0 0012 3z"/>
+            </svg>
+          </div>
+          <h3>Drop your certificate here</h3>
+          <p>or click to browse from your device</p>
+          <div class="formats">PDF &middot; PNG &middot; JPG &middot; JPEG</div>
         </div>
-        <button type="submit" class="btn secondary">Verify Now</button>
-    </form>
-</div>
 
+        <div class="file-selected">
+          <svg width="16" height="16" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path d="M9 12l2 2 4-4" stroke-linecap="round" stroke-linejoin="round"/><circle cx="12" cy="12" r="9"/></svg>
+          <span></span>
+        </div>
+
+        <button type="submit" class="btn btn-secondary btn-lg btn-full" style="margin-top:20px;">
+          <span class="btn-text">
+            <svg width="16" height="16" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path d="M9 12l2 2 4-4" stroke-linecap="round" stroke-linejoin="round"/><circle cx="12" cy="12" r="9"/></svg>
+            Verify Now
+          </span>
+        </button>
+
+      </form>
+    </div>
+
+    <div class="features-strip fade-up fade-up-3" style="margin-top:32px;">
+      <div class="feature-pill"><span class="dot"></span> Fuzzy Matching</div>
+      <div class="feature-pill"><span class="dot"></span> Blockchain Ledger</div>
+      <div class="feature-pill"><span class="dot"></span> PDF Reports</div>
+    </div>
+
+  </div>
+</div>
+{% endblock %}
+
+{% block scripts %}
+<script src="{{ url_for('static', filename='js/bg-verify.js') }}"></script>
 {% endblock %}

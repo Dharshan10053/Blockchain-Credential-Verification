@@ -1,73 +1,188 @@
 {% extends "base.html" %}
 {% block title %}Issue Certificate{% endblock %}
-
-{% block content %}
-<canvas id="bg-animation"></canvas>
+{% block content %} <canvas id="bg-animation"></canvas>
 <div class="container page-wrap">
   <div class="upload-page">
-
-    <div class="section-label fade-up">Issue Certificate</div>
-    <div class="upload-header fade-up fade-up-1">
-      <h1>Issue New Certificate</h1>
-      <p>Upload a certificate image or document. We'll extract the details, generate a unique SHA-256 hash, and permanently record it on the blockchain ledger.</p>
+<div class="section-label fade-up">Issue Certificate</div>
+<div class="upload-header fade-up fade-up-1">
+  <h1>Issue New Certificate</h1>
+  <p>
+    Upload a certificate image or document. We'll extract the details,
+    generate a unique SHA-256 hash, and permanently record it on the
+    blockchain ledger.
+  </p>
+</div>
+{% if error %}
+  <div class="alert alert-error fade-up">
+    <svg
+      width="16"
+      height="16"
+      fill="none"
+      stroke="currentColor"
+      stroke-width="2"
+      viewBox="0 0 24 24"
+    >
+      <circle cx="12" cy="12" r="9"/>
+      <path d="M12 8v5M12 16h.01" stroke-linecap="round"/>
+    </svg>
+    <span>{{ error }}</span>
+  </div>
+{% endif %}
+{% with messages = get_flashed_messages(with_categories=true) %}
+  {% if messages %}
+    {% for category, message in messages %}
+      <div class="alert {{ 'alert-error' if category == 'error' else 'alert-success' }} fade-up">
+        {% if category == 'error' %}
+          <svg
+            width="16"
+            height="16"
+            fill="none"
+            stroke="currentColor"
+            stroke-width="2"
+            viewBox="0 0 24 24"
+          >
+            <circle cx="12" cy="12" r="9"/>
+            <path d="M12 8v5M12 16h.01" stroke-linecap="round"/>
+          </svg>
+        {% else %}
+          <svg
+            width="16"
+            height="16"
+            fill="none"
+            stroke="currentColor"
+            stroke-width="2"
+            viewBox="0 0 24 24"
+          >
+            <path
+              d="M9 12l2 2 4-4"
+              stroke-linecap="round"
+              stroke-linejoin="round"
+            />
+            <circle cx="12" cy="12" r="9"/>
+          </svg>
+        {% endif %}
+        <span>{{ message }}</span>
+      </div>
+    {% endfor %}
+  {% endif %}
+{% endwith %}
+<div class="card card-padded fade-up fade-up-2">
+  <form
+    method="POST"
+    enctype="multipart/form-data"
+    action="{{ url_for('issue') }}"
+    class="upload-form"
+  >
+    <!-- CSRF protection -->
+    <input
+      type="hidden"
+      name="csrf_token"
+      value="{{ csrf_token() }}"
+    >
+    <!-- Admin authentication -->
+    <div class="form-group">
+      <label for="admin_key">Admin API Key</label>
+      <input
+        type="password"
+        id="admin_key"
+        name="admin_key"
+        autocomplete="off"
+        required
+      >
     </div>
-
-    {% with messages = get_flashed_messages(with_categories=true) %}
-      {% if messages %}
-        {% for category, message in messages %}
-          <div class="alert {{ 'alert-error' if category == 'error' else 'alert-success' }} fade-up">
-            {% if category == 'error' %}
-            <svg width="16" height="16" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><circle cx="12" cy="12" r="9"/><path d="M12 8v5M12 16h.01" stroke-linecap="round"/></svg>
-            {% else %}
-            <svg width="16" height="16" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path d="M9 12l2 2 4-4" stroke-linecap="round" stroke-linejoin="round"/><circle cx="12" cy="12" r="9"/></svg>
-            {% endif %}
-            <span>{{ message }}</span>
-          </div>
-        {% endfor %}
-      {% endif %}
-    {% endwith %}
-
-    <div class="card card-padded fade-up fade-up-2">
-      <form method="POST" enctype="multipart/form-data" action="{{ url_for('issue') }}" class="upload-form">
-
-        <div class="upload-zone">
-          <input type="file" name="certificate" accept=".pdf,.png,.jpg,.jpeg,image/*,application/pdf" required>
-          <div class="upload-icon">
-            <svg width="22" height="22" fill="none" stroke="currentColor" stroke-width="1.8" viewBox="0 0 24 24">
-              <path d="M12 16V4M12 4l-4 4M12 4l4 4" stroke-linecap="round" stroke-linejoin="round"/>
-              <path d="M4 16v2a2 2 0 002 2h12a2 2 0 002-2v-2" stroke-linecap="round" stroke-linejoin="round"/>
-            </svg>
-          </div>
-          <h3>Drop your certificate here</h3>
-          <p>or click to browse from your device</p>
-          <div class="formats">PDF &middot; PNG &middot; JPG &middot; JPEG</div>
-        </div>
-
-        <div class="file-selected">
-          <svg width="16" height="16" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path d="M9 12l2 2 4-4" stroke-linecap="round" stroke-linejoin="round"/><circle cx="12" cy="12" r="9"/></svg>
-          <span></span>
-        </div>
-
-        <button type="submit" class="btn btn-primary btn-lg btn-full" style="margin-top:20px;">
-          <span class="btn-text">
-            <svg width="16" height="16" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path d="M12 5v14M5 12h14" stroke-linecap="round"/></svg>
-            Generate &amp; Store
-          </span>
-        </button>
-
-      </form>
+    <div class="upload-zone">
+      <input
+        type="file"
+        name="certificate"
+        accept=".pdf,.png,.jpg,.jpeg,image/*,application/pdf"
+        required
+      >
+      <div class="upload-icon">
+        <svg
+          width="22"
+          height="22"
+          fill="none"
+          stroke="currentColor"
+          stroke-width="1.8"
+          viewBox="0 0 24 24"
+        >
+          <path
+        d="M12 16V4M12 4l-4 4M12 4l4 4"
+        stroke-linecap="round"
+        stroke-linejoin="round"
+          />
+          <path
+            d="M4 16v2a2 2 0 002 2h12a2 2 0 002-2v-2"
+            stroke-linecap="round"
+            stroke-linejoin="round"
+          />
+        </svg>
+      </div>
+      <h3>Drop your certificate here</h3>
+      <p>or click to browse from your device</p>
+      <div class="formats">
+        PDF &middot; PNG &middot; JPG &middot; JPEG
+      </div>
     </div>
-
-    <div class="features-strip fade-up fade-up-3" style="margin-top:32px;">
-      <div class="feature-pill"><span class="dot"></span> SHA-256 Hashing</div>
-      <div class="feature-pill"><span class="dot"></span> Blockchain Ledger</div>
-      <div class="feature-pill"><span class="dot"></span> QR Code Generation</div>
+    <div class="file-selected">
+      <svg
+        width="16"
+        height="16"
+        fill="none"
+        stroke="currentColor"
+        stroke-width="2"
+        viewBox="0 0 24 24"
+      >
+        <path
+          d="M9 12l2 2 4-4"
+          stroke-linecap="round"
+          stroke-linejoin="round"
+        />
+        <circle cx="12" cy="12" r="9"/>
+      </svg>
+      <span></span>
     </div>
-
+    <button
+      type="submit"
+      class="btn btn-primary btn-lg btn-full"
+      style="margin-top:20px;"
+    >
+      <span class="btn-text">
+        <svg
+          width="16"
+          height="16"
+          fill="none"
+          stroke="currentColor"
+          stroke-width="2"
+          viewBox="0 0 24 24"
+        >
+          <path
+            d="M12 5v14M5 12h14"
+            stroke-linecap="round"
+          />
+        </svg>
+        Generate &amp; Store
+      </span>
+    </button>
+  </form>
+</div>
+<div
+  class="features-strip fade-up fade-up-3"
+  style="margin-top:32px;"
+>
+  <div class="feature-pill">
+    <span class="dot"></span> SHA-256 Hashing
+  </div>
+  <div class="feature-pill">
+    <span class="dot"></span> Blockchain Ledger
+  </div>
+  <div class="feature-pill">
+    <span class="dot"></span> QR Code Generation
+  </div>
+</div>
   </div>
 </div>
 {% endblock %}
-
 {% block scripts %}
 <script src="{{ url_for('static', filename='js/bg-issue.js') }}"></script>
 {% endblock %}

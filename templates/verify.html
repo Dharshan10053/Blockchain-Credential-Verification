@@ -29,9 +29,10 @@
 
     <div class="card card-padded fade-up fade-up-2">
       <form method="POST" enctype="multipart/form-data" class="upload-form">
+        <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
 
         <div class="upload-zone">
-          <input type="file" name="certificate" required>
+          <input type="file" name="certificate" accept=".pdf,.png,.jpg,.jpeg,image/*,application/pdf" required>
           <div class="upload-icon">
             <svg width="22" height="22" fill="none" stroke="currentColor" stroke-width="1.8" viewBox="0 0 24 24">
               <path d="M9 12l2 2 4-4" stroke-linecap="round" stroke-linejoin="round"/>

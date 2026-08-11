@@ -46,10 +46,15 @@ app = Flask(__name__)
 _secret_key = os.environ.get("SECRET_KEY")
 if not _secret_key:
     if not IS_DEVELOPMENT:
-        logger.warning(
-            "SECRET_KEY is not set. Using an ephemeral random key for this "
-            "process only -- all sessions/CSRF tokens will be invalidated on "
-            "restart. Set SECRET_KEY in the environment for production."
+        # Fail safely at startup rather than silently running production
+        # with an ephemeral key: an ephemeral key invalidates all sessions
+        # and CSRF tokens on every restart/worker respawn and offers no
+        # durable secret to protect them in the meantime.
+        raise RuntimeError(
+            "SECRET_KEY is not set. Refusing to start in production "
+            "(FLASK_ENV=production) without a persistent SECRET_KEY. Set "
+            "SECRET_KEY in the environment (see .env.example), or set "
+            "FLASK_ENV=development for local runs."
         )
     _secret_key = secrets.token_hex(32)
 app.secret_key = _secret_key
@@ -122,6 +127,21 @@ def allowed_file(filename: str) -> bool:
         return False
     ext = filename.rsplit(".", 1)[1].lower()
     return ext in ALLOWED_EXTENSIONS
+def _save_uploaded_file(file) -> str:
+    """Sanitize the filename with secure_filename(), then make it unique
+    with a random token so concurrent/repeat uploads never overwrite an
+    existing file on disk. Saves the file and returns the saved filepath.
+    """
+    base_name = secure_filename(file.filename)
+    stem, dot, ext = base_name.rpartition(".")
+    unique_token = secrets.token_hex(8)
+    if dot:
+        filename = f"{stem}_{unique_token}.{ext}"
+    else:
+        filename = f"{base_name}_{unique_token}"
+    filepath = os.path.join(UPLOAD_FOLDER, filename)
+    file.save(filepath)
+    return filepath
 # ----------------------------------
 # IMAGE PREPROCESSING
 # ----------------------------------
@@ -301,7 +321,7 @@ def _ocr_pdf(file_path: str) -> str:
         
         # 2. Remove isolated symbols like >, &, %, |, \, /, _, ~, - when they appear alone
         # These are often OCR artifacts in bad scans
-        text = re.sub(r"(?<=^|\s)[>&%|\\/_~-](?=\s|$)", "", text)
+        text = re.sub(r"(?<!\S)[>&%|\\/_~-](?=\s|$)", "", text)
         
         # 3. Collapse multiple spaces into one
         text = re.sub(r"[ \t]+", " ", text)
@@ -522,6 +542,36 @@ def _extract_name(lines: list, full_text: str) -> str:
                         return _valid(line)
     return NOT_PROVIDED
 def _extract_course(lines: list, full_text: str) -> str:
+    # 0) Certificate title immediately before "Certificate of Completion"
+    for i, line in enumerate(lines):
+        if "certificate of completion" in line.lower():
+            candidates = []
+
+            for j in range(max(0, i - 3), i):
+                cand = _clean(lines[j])
+                low = cand.lower()
+
+                if not cand:
+                    continue
+
+                if any(x in low for x in [
+                    "certificate", "completion", "participant",
+                    "presented to", "awarded to"
+                ]):
+                    continue
+
+                words = cand.split()
+                if 1 <= len(words) <= 10:
+                    candidates.append(cand)
+
+            if candidates:
+                title = " ".join(candidates[-2:])
+
+                if len(title.split()) <= 12:
+                    return _valid(title)
+
+                return _valid(candidates[-1])
+
     # 1) Label-based
     label_result = _valid(_label_extract(
         lines, full_text,
@@ -576,38 +626,48 @@ def _extract_date(full_text: str) -> str:
     # 1) Label-based date extraction
     date_labels = [
         "date of issue", "issue date", "date of award", "awarded on",
-        "issued on", "date of completion", "completion date", "date",
+        "issued on", "date of completion", "completion date",
     ]
+
     for lbl in date_labels:
-        pat = re.compile(re.escape(lbl) + r"\s*[:\-]?\s*([^\n]{4,40})", re.IGNORECASE)
+        pat = re.compile(
+            re.escape(lbl) + r"\s*[:\-]?\s*([^\n]{4,40})",
+            re.IGNORECASE,
+        )
         m = pat.search(full_text)
+
         if m:
             candidate = _clean(m.group(1))
+
             if re.search(r"\d{1,4}", candidate):
                 return _valid(candidate[:40])
-    # 2) Regex date patterns (most specific first)
+
+    # 2) Common date formats
     date_patterns = [
-        # "March 4, 2026" / "March 2026"
-        r"\b(?:Jan(?:uary)?|Feb(?:ruary)?|Mar(?:ch)?|Apr(?:il)?|May|Jun(?:e)?|"
-        r"Jul(?:y)?|Aug(?:ust)?|Sep(?:tember)?|Oct(?:ober)?|Nov(?:ember)?|"
-        r"Dec(?:ember)?)\s+\d{1,2},?\s+\d{4}\b",
-        # "4 March 2026"
-        r"\b\d{1,2}\s+(?:Jan(?:uary)?|Feb(?:ruary)?|Mar(?:ch)?|Apr(?:il)?|May|"
+        # July 30th, 2024 / March 4, 2026
+        r"\b(?:Jan(?:uary)?|Feb(?:ruary)?|Mar(?:ch)?|Apr(?:il)?|May|"
         r"Jun(?:e)?|Jul(?:y)?|Aug(?:ust)?|Sep(?:tember)?|Oct(?:ober)?|"
-        r"Nov(?:ember)?|Dec(?:ember)?),?\s+\d{4}\b",
-        # "4th March 2026"
-        r"\b\d{1,2}(?:st|nd|rd|th)?\s+(?:of\s+)?(?:Jan(?:uary)?|Feb(?:ruary)?|"
-        r"Mar(?:ch)?|Apr(?:il)?|May|Jun(?:e)?|Jul(?:y)?|Aug(?:ust)?|"
-        r"Sep(?:tember)?|Oct(?:ober)?|Nov(?:ember)?|Dec(?:ember)?)\s*,?\s*\d{4}\b",
-        # "04/03/2026" or "2026-03-04"
+        r"Nov(?:ember)?|Dec(?:ember)?)\s+\d{1,2}(?:st|nd|rd|th)?,?\s+\d{4}\b",
+
+        # 4th March 2026 / 4 March 2026
+        r"\b\d{1,2}(?:st|nd|rd|th)?\s+(?:of\s+)?"
+        r"(?:Jan(?:uary)?|Feb(?:ruary)?|Mar(?:ch)?|Apr(?:il)?|May|"
+        r"Jun(?:e)?|Jul(?:y)?|Aug(?:ust)?|Sep(?:tember)?|Oct(?:ober)?|"
+        r"Nov(?:ember)?|Dec(?:ember)?)\s*,?\s*\d{4}\b",
+
+        # 04/03/2026 or 2026-03-04
         r"\b\d{1,2}[\/\-\.]\d{1,2}[\/\-\.]\d{2,4}\b",
         r"\b\d{4}[\/\-\.]\d{1,2}[\/\-\.]\d{1,2}\b",
     ]
+
     for pat in date_patterns:
         m = re.search(pat, full_text, flags=re.IGNORECASE)
+
         if m:
             return _valid(_clean(m.group(0)))
+
     return NOT_PROVIDED
+
 def _extract_cert_id(full_text: str) -> str:
     # 1) Label-based
     id_labels = [
@@ -615,6 +675,10 @@ def _extract_cert_id(full_text: str) -> str:
         "cert no", "cert id", "cert. no", "registration no",
         "registration number", "ref no", "reference no",
         "id no", "serial no", "enrollment no",
+        "enrolment verification code",
+        "enrollment verification code",
+        "user verification code",
+        "verification code",
     ]
     for lbl in id_labels:
         pat = re.compile(
@@ -662,7 +726,7 @@ def _extract_university(lines: list) -> str:
     )
     org_keywords = (
         "devtown", "coursera", "udemy", "aws", "google",
-        "microsoft", "ibm", "oracle", "meta", "edx"
+        "microsoft", "ibm", "oracle", "meta", "edx", "forage"
     )
     candidates = []
     for line in lines:
@@ -784,9 +848,7 @@ def issue():
         file = request.files.get("certificate")
         if not file or not allowed_file(file.filename):
             return render_template("issue.html", error="Invalid file type."), 400
-        filename = secure_filename(file.filename)
-        filepath = os.path.join(UPLOAD_FOLDER, filename)
-        file.save(filepath)
+        filepath = _save_uploaded_file(file)
         text = perform_ocr(filepath)
         details = extract_details(text)
         cert_hash = generate_hash(details)
@@ -809,9 +871,7 @@ def verify():
         file = request.files.get("certificate")
         if not file or not allowed_file(file.filename):
             return render_template("verify.html", error="Invalid file type."), 400
-        filename = secure_filename(file.filename)
-        filepath = os.path.join(UPLOAD_FOLDER, filename)
-        file.save(filepath)
+        filepath = _save_uploaded_file(file)
         text = perform_ocr(filepath)
         details = extract_details(text)
         cert_hash = generate_hash(details)
@@ -833,9 +893,7 @@ def verify():
 # ----------------------------------
 def _process_upload(file):
     """Save uploaded file, run OCR, extract details and hash. Returns (details, cert_hash) or raises."""
-    filename = secure_filename(file.filename)
-    filepath = os.path.join(UPLOAD_FOLDER, filename)
-    file.save(filepath)
+    filepath = _save_uploaded_file(file)
     text = perform_ocr(filepath)
     details = extract_details(text)
     cert_hash = generate_hash(details)
@@ -871,8 +929,9 @@ def api_issue():
         resp["status"] = status
         return jsonify(resp)
     except Exception as e:
-        logger.error("api_issue error: %s", e)
-        return jsonify({"error": str(e)}), 500
+        logger.error("api_issue error: %s", e, exc_info=True)
+        error_msg = str(e) if IS_DEVELOPMENT else "Internal server error"
+        return jsonify({"error": error_msg}), 500
 @app.route("/api/verify", methods=["POST"])
 @csrf.exempt
 def api_verify():
@@ -886,53 +945,65 @@ def api_verify():
         resp["status"] = status
         return jsonify(resp)
     except Exception as e:
-        logger.error("api_verify error: %s", e)
-        return jsonify({"error": str(e)}), 500
+        logger.error("api_verify error: %s", e, exc_info=True)
+        error_msg = str(e) if IS_DEVELOPMENT else "Internal server error"
+        return jsonify({"error": error_msg}), 500
 # ----------------------------------
 # ERROR HANDLERS
 # ----------------------------------
-# TODO: Confirm templates/errors/{400,403,404,429,500,503}.html exist in the
-# project before relying on these in production. They were not present among
-# the supporting files reviewed during this merge; if missing, either add
-# them or these handlers will raise TemplateNotFound on the corresponding
-# error paths (normal request handling is unaffected either way).
+# templates/errors/{400,403,404,429,500,503}.html were not present in the
+# project as reviewed, so render_template() for them would raise
+# TemplateNotFound *while already handling an error* -- turning e.g. a
+# simple 404 into an unhandled 500. _render_error_page() guards against that
+# by falling back to a minimal inline HTML response if the template is
+# missing, so an HTML error response is always returned successfully.
+from jinja2 import TemplateNotFound
 def _wants_json() -> bool:
     return request.path.startswith("/api/")
+def _render_error_page(template_name: str, status_code: int, message: str):
+    try:
+        return render_template(template_name), status_code
+    except TemplateNotFound:
+        logger.debug("Error template %s not found; using fallback response.", template_name)
+        return (
+            f"<!doctype html><title>{status_code}</title>"
+            f"<h1>{status_code}</h1><p>{message}</p>"
+        ), status_code
 @app.errorhandler(400)
 def bad_request(e):
     if _wants_json():
         return jsonify({"error": "Bad request"}), 400
-    return render_template("errors/400.html"), 400
+    return _render_error_page("errors/400.html", 400, "Bad request.")
 @app.errorhandler(403)
 def forbidden(e):
     if _wants_json():
         return jsonify({"error": "Forbidden"}), 403
-    return render_template("errors/403.html"), 403
+    return _render_error_page("errors/403.html", 403, "Forbidden.")
 @app.errorhandler(404)
 def not_found(e):
     if _wants_json():
         return jsonify({"error": "Not found"}), 404
-    return render_template("errors/404.html"), 404
+    return _render_error_page("errors/404.html", 404, "Not found.")
 @app.errorhandler(429)
 def rate_limited(e):
     if _wants_json():
         return jsonify({"error": "Too many requests"}), 429
-    return render_template("errors/429.html"), 429
+    return _render_error_page("errors/429.html", 429, "Too many requests.")
 @app.errorhandler(500)
 def server_error(e):
     if _wants_json():
         return jsonify({"error": "Internal server error"}), 500
-    return render_template("errors/500.html"), 500
+    return _render_error_page("errors/500.html", 500, "Internal server error.")
 @app.errorhandler(503)
 def service_unavailable(e):
     if _wants_json():
         return jsonify({"error": "Service unavailable"}), 503
-    return render_template("errors/503.html"), 503
+    return _render_error_page("errors/503.html", 503, "Service unavailable.")
 @app.errorhandler(CSRFError)
 def csrf_error(e):
     if _wants_json():
         return jsonify({"error": "CSRF validation failed"}), 400
-    return render_template("errors/400.html"), 400
+    return _render_error_page("errors/400.html", 400, "CSRF validation failed.")
 # ----------------------------------
 # RUN APP
 # ----------------------------------

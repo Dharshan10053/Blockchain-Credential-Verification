@@ -442,8 +442,8 @@ def perform_ocr(filepath: str) -> str:
 # ----------------------------------
 NOT_PROVIDED = "Not Provided"
 def _clean(s: str) -> str:
-    """Collapse whitespace and strip punctuation borders."""
-    return re.sub(r"\s+", " ", (s or "").strip()).strip(" .,:;-")
+    """Collapse whitespace and strip punctuation/quote borders."""
+    return re.sub(r"\s+", " ", (s or "").strip()).strip(" .,:;-\"'\u201c\u201d\u2018\u2019")
 def _valid(value: str) -> str:
     """
     Return the value if it looks meaningful, otherwise NOT_PROVIDED.
@@ -460,7 +460,17 @@ def _label_extract(lines: list, full_text: str, labels: list, max_words: int = 1
     """
     for line in lines:
         for lbl in labels:
-            pat = re.compile(re.escape(lbl) + r"\s*[:\-]?\s*(.+)", re.IGNORECASE)
+            # "Label: value" / "Label - value" is unambiguous anywhere in the
+            # line. Without a separator, the label must start the line --
+            # otherwise a generic label word (e.g. "training") can spuriously
+            # match mid-sentence inside an unrelated line such as
+            # "ACME TRAINING ACADEMY".
+            pat = re.compile(
+                r"(?:^\s*" + re.escape(lbl) + r"\s*[:\-]\s*"
+                r"|" + re.escape(lbl) + r"\s*:\s*"
+                r"|^\s*" + re.escape(lbl) + r"\s+)(.+)",
+                re.IGNORECASE,
+            )
             m = pat.search(line)
             if m:
                 val = _clean(m.group(1))
@@ -541,87 +551,155 @@ def _extract_name(lines: list, full_text: str) -> str:
                     if any(w[0].isupper() for w in words):
                         return _valid(line)
     return NOT_PROVIDED
-def _extract_course(lines: list, full_text: str) -> str:
-    # 0) Certificate title immediately before "Certificate of Completion"
-    for i, line in enumerate(lines):
-        if "certificate of completion" in line.lower():
-            candidates = []
+_BRANDING_GLYPHS = "»«★☆✦✧➤➔→◆●•‣∎॥"
+def _looks_like_branding(text: str) -> bool:
+    """
+    Heuristic for text that is issuer/platform branding rather than a course
+    or program title -- e.g. "»» LearnTube by CareerNinja". Branding lines
+    are typically decorated with logo glyphs/arrows/stars, or follow the
+    "<Product> by <Company>" pattern used by many certificate platforms.
+    This is layout-independent: it only looks at the text content, not its
+    position on the page.
+    """
+    t = (text or "").strip()
+    if not t:
+        return False
+    if any(ch in t for ch in _BRANDING_GLYPHS):
+        return True
+    if re.search(r"\bby\s+[A-Z][A-Za-z0-9&.\-]+", t):
+        return True
+    return False
+_COURSE_LABELS = [
+    "course name", "course", "program", "programme",
+    "training", "module", "subject", "field of study", "degree",
+]
+_COURSE_TRIGGERS = [
+    "successfully completed the course", "for successfully completing",
+    "completing the course", "completed the course", "for completing",
+    "completion of the course", "for the course", "for the online course",
+    "course entitled", "for the program", "has completed", "completed",
+]
+_COURSE_DEGREE_PATTERNS = [
+    r"\bBachelor\s+of\s+[A-Za-z&\.\s]{2,60}",
+    r"\bMaster\s+of\s+[A-Za-z&\.\s]{2,60}",
+    r"\bDoctor\s+of\s+[A-Za-z&\.\s]{2,60}",
+    r"\bB\.?\s?Tech\b[A-Za-z\s\(\)]*",
+    r"\bM\.?\s?Tech\b[A-Za-z\s\(\)]*",
+    r"\bB\.?\s?Sc\b[A-Za-z\s\(\)]*",
+    r"\bM\.?\s?Sc\b[A-Za-z\s\(\)]*",
+    r"\bB\.?\s?E\b[A-Za-z\s\(\)]*",
+    r"\bDiploma\s+in\s+[A-Za-z&\.\s]{2,60}",
+    r"\bCertificate\s+in\s+[A-Za-z&\.\s]{2,60}",
+]
+_COURSE_QUOTE_PATTERN = re.compile(r"[\"\u201c\u2018]([^\"\u201d\u2019]{2,80})[\"\u201d\u2019]")
+_COURSE_EXCLUDE_WORDS = {
+    "ceo", "founder", "certificate", "id", "date", "director",
+    "signature", "certify", "presented", "awarded", "issued",
+    "verification", "blockchain",
+}
+def _score_course_candidate(cand: str, *, near_trigger: bool, quoted: bool,
+                             is_degree: bool, university: str, name: str):
+    """
+    Score a candidate course/title string using contextual clues rather than
+    its position alone. Returns None for structurally invalid candidates
+    (empty, no letters, too long/short), otherwise a float score where
+    higher is more likely to be the real course title.
+    """
+    cand = (cand or "").strip()
+    words = cand.split()
+    if not words or not (1 <= len(words) <= 12) or not re.search(r"[A-Za-z]", cand):
+        return None
+    score = 0.0
+    if near_trigger:
+        score += 6
+    if quoted:
+        score += 5
+    if is_degree:
+        score += 4
+    score += 2 if len(words) <= 8 else 1
+    low = cand.lower()
+    if any(w in low.split() for w in _COURSE_EXCLUDE_WORDS):
+        score -= 4
+    if _looks_like_branding(cand):
+        score -= 9
+    if university and university != NOT_PROVIDED and low == university.strip().lower():
+        score -= 9
+    if name and name != NOT_PROVIDED and low == name.strip().lower():
+        score -= 9
+    return score
+def _extract_course(lines: list, full_text: str, university: str = "", name: str = "") -> str:
+    """
+    Extract the course/program title.
 
-            for j in range(max(0, i - 3), i):
-                cand = _clean(lines[j])
-                low = cand.lower()
-
-                if not cand:
-                    continue
-
-                if any(x in low for x in [
-                    "certificate", "completion", "participant",
-                    "presented to", "awarded to"
-                ]):
-                    continue
-
-                words = cand.split()
-                if 1 <= len(words) <= 10:
-                    candidates.append(cand)
-
-            if candidates:
-                title = " ".join(candidates[-2:])
-
-                if len(title.split()) <= 12:
-                    return _valid(title)
-
-                return _valid(candidates[-1])
-
-    # 1) Label-based
-    label_result = _valid(_label_extract(
-        lines, full_text,
-        [
-            "course name", "course", "program", "programme",
-            "training", "module", "subject", "field of study", "degree",
-        ],
-        max_words=10,
-    ))
-    if label_result != NOT_PROVIDED:
-        return label_result
-    # 2) Explicit degree patterns
-    degree_pats = [
-        r"\bBachelor\s+of\s+[A-Za-z&\.\s]{2,60}",
-        r"\bMaster\s+of\s+[A-Za-z&\.\s]{2,60}",
-        r"\bDoctor\s+of\s+[A-Za-z&\.\s]{2,60}",
-        r"\bB\.?\s?Tech\b[A-Za-z\s\(\)]*",
-        r"\bM\.?\s?Tech\b[A-Za-z\s\(\)]*",
-        r"\bB\.?\s?Sc\b[A-Za-z\s\(\)]*",
-        r"\bM\.?\s?Sc\b[A-Za-z\s\(\)]*",
-        r"\bB\.?\s?E\b[A-Za-z\s\(\)]*",
-        r"\bDiploma\s+in\s+[A-Za-z&\.\s]{2,60}",
-        r"\bCertificate\s+in\s+[A-Za-z&\.\s]{2,60}",
-    ]
+    Multiple independent signals are collected as candidates -- an explicit
+    label ("Course: ..."), quoted text, degree/diploma phrasing, text
+    following a completion trigger phrase, and (weakly) the line just above
+    a "Certificate of Completion" heading -- and ranked with a scoring
+    function instead of trusting any single fixed layout cue. This matters
+    because the text immediately preceding "Certificate of Completion" is
+    sometimes the course title but is often issuer/platform branding (e.g.
+    "»» LearnTube by CareerNinja"); such candidates are penalized and cross
+    -checked against the already-extracted university/issuer and candidate
+    name so branding or the recipient's name can't win out over the real
+    title. No certificate-specific text is hard-coded.
+    """
+    candidates = []  # list of (text, score)
+    def add(cand, **kwargs):
+        cand = _clean(cand)
+        s = _score_course_candidate(cand, university=university, name=name, **kwargs)
+        if s is not None:
+            candidates.append((cand, s))
+    # 1) Label-based: "Course: ...", "Program: ...", etc.
+    label_result = _label_extract(lines, full_text, _COURSE_LABELS, max_words=10)
+    if label_result:
+        add(label_result, near_trigger=False, quoted=False, is_degree=False)
+    # 2) Quoted text anywhere in the document (many certificates quote the title)
+    for m in _COURSE_QUOTE_PATTERN.finditer(full_text):
+        add(m.group(1), near_trigger=False, quoted=True, is_degree=False)
+    # 3) Explicit degree/diploma/"Certificate in ..." patterns
     for line in lines:
-        for pat in degree_pats:
+        for pat in _COURSE_DEGREE_PATTERNS:
             m = re.search(pat, line, flags=re.IGNORECASE)
             if m:
-                val = _valid(_clean(m.group(0)))
-                if val != NOT_PROVIDED and len(val.split()) <= 10:
-                    return val
-    # 3) Trigger phrase → scan forward for a valid course line
-    triggers = [
-        "completed", "completion of", "successfully completed",
-        "for completing", "course entitled", "for the course",
-        "has completed", "for successfully completing",
-    ]
+                add(m.group(0), near_trigger=False, quoted=False, is_degree=True)
+    # 4) Trigger phrase ("completed the course", "course entitled", ...) ->
+    #    scan forward a few lines for the title that follows it
     skip_if = ["certificate of completion", "certificate of participation"]
-    course_exclude = {"ceo", "founder", "certificate", "id", "date", "director", "signature"}
     for i, line in enumerate(lines):
         low = line.lower()
         if any(sk in low for sk in skip_if):
             continue
-        if any(trig in low for trig in triggers):
+        if any(trig in low for trig in _COURSE_TRIGGERS):
             for j in range(i + 1, min(i + 5, len(lines))):
+                add(lines[j], near_trigger=True, quoted=False, is_degree=False)
+    # 5) Line(s) immediately before a "Certificate of Completion" heading.
+    #    This is a weak, position-only signal -- it is frequently issuer
+    #    branding rather than the course title -- so it only gets a small
+    #    baseline score and a mild penalty, letting stronger signals above
+    #    outrank it when present.
+    for i, line in enumerate(lines):
+        if "certificate of completion" in line.lower():
+            for j in range(max(0, i - 3), i):
                 cand = _clean(lines[j])
-                words = cand.split()
-                if 1 <= len(words) <= 10 and not any(ex in cand.lower() for ex in course_exclude):
-                    return _valid(cand)
-    return NOT_PROVIDED
+                low = cand.lower()
+                if not cand or any(x in low for x in [
+                    "certificate", "completion", "participant",
+                    "presented to", "awarded to",
+                ]):
+                    continue
+                s = _score_course_candidate(
+                    cand, near_trigger=False, quoted=False, is_degree=False,
+                    university=university, name=name,
+                )
+                if s is not None:
+                    candidates.append((cand, s - 1))
+    if not candidates:
+        return NOT_PROVIDED
+    candidates.sort(key=lambda c: c[1], reverse=True)
+    best_text, best_score = candidates[0]
+    if best_score < 0:
+        return NOT_PROVIDED
+    return _valid(best_text)
 def _extract_date(full_text: str) -> str:
     # 1) Label-based date extraction
     date_labels = [
@@ -778,13 +856,13 @@ def extract_details(text: str) -> dict:
     full_text = " ".join(lines)       # Single line — better for label regex
     full_text_nl = "\n".join(lines)   # With newlines — better for context
     name       = _extract_name(lines, full_text)
-    course     = _extract_course(lines, full_text)
+    university = _extract_university(lines)
+    course     = _extract_course(lines, full_text, university=university, name=name)
     date       = _extract_date(full_text)
     cert_id    = _extract_cert_id(full_text)
-    university = _extract_university(lines)
     year       = _extract_year(full_text)
     # Use year as date fallback when no formatted date was found
-    if date == "Unknown" and year != "Unknown":
+    if date == NOT_PROVIDED and year != NOT_PROVIDED:
         date = year
     logger.info(
         "\n%s\nEXTRACTED DETAILS\n"

@@ -21,3 +21,5 @@ cursor_access_test.txt
 
 # Graphify generated cache
 graphify-out/cache/
+blockchain.txt
+certificates.db

@@ -913,6 +913,56 @@ def verify_certificate(cert_hash):
     hashes = load_hashes()
     return "VERIFIED" if cert_hash in hashes else "FAKE"
 # ----------------------------------
+# VERIFICATION RESULT DISPLAY MAPPING
+# ----------------------------------
+# result.html renders its status badge/color/label/message/confidence ring
+# from these specific variable names. verify_certificate() itself only ever
+# returns the two raw outcomes "VERIFIED" or "FAKE" -- this function's only
+# job is to translate that raw outcome into the display fields the template
+# actually reads. It does not re-implement or alter the hash/blockchain
+# verification decision in any way; that remains solely verify_certificate()'s
+# responsibility.
+def _verification_display_context(status_raw: str, details: dict) -> dict:
+    is_valid = status_raw == "VERIFIED"
+    # Extraction completeness only feeds the confidence indicator that
+    # result.html already displays -- it has no bearing on the VALID/FAKE
+    # decision above, which is determined solely by the hash lookup.
+    fields = [details.get("name"), details.get("course"),
+              details.get("date"), details.get("cert_id")]
+    extracted = sum(1 for f in fields if f and f not in (NOT_PROVIDED, "Unknown"))
+    extraction_ratio = extracted / len(fields)
+    if is_valid:
+        return {
+            "status": "VALID",
+            "color": "green",
+            "label": "Genuine Certificate",
+            "message": (
+                "This certificate's hash was found on record. "
+                "It is authentic and has not been altered."
+            ),
+            "confidence_score": round(70 + 30 * extraction_ratio, 1),
+            "explanation": (
+                "Hash matched a registered certificate; score reflects how "
+                "completely its details were read."
+            ),
+            "issuing_authority": details.get("university"),
+        }
+    return {
+        "status": "FAKE",
+        "color": "red",
+        "label": "Not Verified",
+        "message": (
+            "This certificate's hash was not found on record. "
+            "It may be fake, modified, or was never registered."
+        ),
+        "confidence_score": round(30 * extraction_ratio, 1),
+        "explanation": (
+            "Hash did not match any registered certificate; score reflects "
+            "how completely its details were read."
+        ),
+        "issuing_authority": details.get("university"),
+    }
+# ----------------------------------
 # ROUTES
 # ----------------------------------
 @app.route("/")
@@ -953,15 +1003,17 @@ def verify():
         text = perform_ocr(filepath)
         details = extract_details(text)
         cert_hash = generate_hash(details)
-        status = verify_certificate(cert_hash)
+        status_raw = verify_certificate(cert_hash)
+        display_context = _verification_display_context(status_raw, details)
         return render_template(
             "result.html",
-            status=status,
+            action="VERIFY",
             name=details["name"],
             course=details["course"],
             date=details["date"],
             cert_id=details["cert_id"],
             hash=cert_hash,
+            **display_context,
         )
     # GET /verify renders the verify form (verify.html already exists as a
     # template -- it is used above for the POST error path).

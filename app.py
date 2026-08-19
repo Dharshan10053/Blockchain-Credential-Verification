@@ -981,9 +981,27 @@ def issue():
         details = extract_details(text)
         cert_hash = generate_hash(details)
         status = add_certificate(cert_hash)
+
+        if status == "ALREADY EXISTS":
+            color, label, message = (
+                "orange",
+                "Already Issued",
+                "This certificate already exists in the ledger.",
+            )
+        else:
+            color, label, message = (
+                "green",
+                "Certificate Issued",
+                "This certificate has been successfully issued and recorded on the blockchain ledger.",
+            )
+
         return render_template(
             "result.html",
+            action="ISSUE",
             status=status,
+            color=color,
+            label=label,
+            message=message,
             name=details["name"],
             course=details["course"],
             date=details["date"],

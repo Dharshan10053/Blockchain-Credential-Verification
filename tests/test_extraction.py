@@ -22,7 +22,34 @@ from app import extract_details, perform_ocr  # noqa: E402
 
 _FIXTURE_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), "fixtures")
 _REAL_CERT_PATH = os.path.join(_FIXTURE_DIR, "Intro_to_Python_Certificate.jpg")
+_FORAGE_CERT_PATH = os.path.join(_FIXTURE_DIR, "Forage_Data_Analytics_Certificate.png")
 _TESSERACT_AVAILABLE = shutil.which("tesseract") is not None
+
+
+def test_real_forage_certificate_end_to_end():
+    """
+    End-to-end regression test using the ACTUAL Forage/Accenture certificate
+    image reported as failing, through the real perform_ocr() ->
+    extract_details() pipeline. Requires tesseract to be installed; skipped
+    otherwise. OCR character-level noise (e.g. a misread character inside
+    the verification code) is tolerated -- what this test guards against is
+    the field-mapping bugs: wrong field (course), missing field (issuer),
+    and structurally wrong value (verification code from a lost OCR line).
+    """
+    if not _TESSERACT_AVAILABLE:
+        print("SKIP: tesseract not installed, cannot run real OCR test.")
+        return
+    if not os.path.exists(_FORAGE_CERT_PATH):
+        print(f"SKIP: fixture not found at {_FORAGE_CERT_PATH}.")
+        return
+
+    raw_text = perform_ocr(_FORAGE_CERT_PATH)
+    details = extract_details(raw_text)
+
+    assert details["name"] == "KADARI JAYANTH", details
+    assert details["course"] == "Data Analytics and Visualization Job Simulation", details
+    assert details["university"] == "Forage", details
+    assert details["cert_id"] == "baufGddHyZpSw9moj", details
 
 
 def test_real_learntube_certificate_end_to_end():
@@ -127,6 +154,72 @@ def test_label_based_course_layout():
     assert details["name"] == "Priya Sharma", details
 
 
+def test_forage_task_list_layout_not_confused_with_course():
+    """
+    Regression test for the reported bug: on the Forage/Accenture "Data
+    Analytics and Visualization Job Simulation" certificate, the course was
+    extracted as "Project Understanding" (the first item in a bulleted task
+    list) instead of the real title, which sits directly under the
+    recipient's name and above the "Certificate of Completion" heading.
+
+    Root cause: the generic trigger phrase "has completed" matched inside
+    "... has completed practical tasks in:" -- a sentence that introduces a
+    *list*, not a single title -- so the task-list items that followed were
+    scored as strong course-title candidates. This reconstructs the
+    raw-OCR-like text for that layout (title wrapped across two lines,
+    list-introducing sentence ending in ":", followed by task names).
+    """
+    raw_text = (
+        "accenture\n"
+        "Forage\n"
+        "KADARI JAYANTH\n"
+        "Data Analytics and Visualization Job\n"
+        "Simulation\n"
+        "Certificate of Completion\n"
+        "July 30th, 2024\n"
+        "Over the period of July 2024, KADARI JAYANTH has completed practical tasks in:\n"
+        "Project Understanding\n"
+        "Data Cleaning & Modeling\n"
+        "Data Visualization & Storytelling\n"
+        "Present to the Client\n"
+        "Caroline Dudley Tom Brunskill\n"
+        "Managing Director CEO, Co-Founder of\n"
+        "North America Forage\n"
+        "Recruiting\n"
+        "Enrolment Verification Code baufGddHyZpSw9moj | "
+        "User Verification Code sWmCHJ6ybQdnNZzv6 | Issued by Forage\n"
+    )
+    details = extract_details(raw_text)
+
+    assert details["name"] == "KADARI JAYANTH", details
+    assert details["course"] == "Data Analytics and Visualization Job Simulation", details
+    # None of the task-list items should ever win as the course title.
+    for task in ("Project Understanding", "Data Cleaning & Modeling",
+                 "Data Visualization & Storytelling", "Present to the Client"):
+        assert details["course"] != task, details
+    assert details["university"] == "Forage", details
+    assert details["cert_id"] == "baufGddHyZpSw9moj", details
+
+
+def test_list_intro_trigger_line_is_not_used_as_course_source():
+    """
+    Narrower unit-level check: a sentence ending in ":" that happens to
+    contain "has completed" must not be treated as a course-introducing
+    trigger, even when there is no other course signal in the document.
+    Extraction should fall back to "Not Provided" rather than guessing a
+    list item.
+    """
+    raw_text = (
+        "Jordan Lee has completed practical tasks in:\n"
+        "Task One\n"
+        "Task Two\n"
+        "Task Three\n"
+    )
+    details = extract_details(raw_text)
+    assert details["course"] == "Not Provided", details
+    assert details["course"] not in ("Task One", "Task Two", "Task Three")
+
+
 def test_branding_only_candidate_is_rejected_not_fabricated():
     """
     If the only text near the heading is branding-like and there is no
@@ -149,9 +242,12 @@ def test_branding_only_candidate_is_rejected_not_fabricated():
 if __name__ == "__main__":
     tests = [
         test_real_learntube_certificate_end_to_end,
+        test_real_forage_certificate_end_to_end,
         test_learntube_careerninja_bug_regression,
         test_university_degree_layout_still_works,
         test_label_based_course_layout,
+        test_forage_task_list_layout_not_confused_with_course,
+        test_list_intro_trigger_line_is_not_used_as_course_source,
         test_branding_only_candidate_is_rejected_not_fabricated,
     ]
     failures = 0

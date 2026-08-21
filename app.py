@@ -166,15 +166,27 @@ def _deskew(gray: np.ndarray) -> np.ndarray:
     except Exception as e:
         logger.debug("Deskew failed: %s", e)
         return gray
-def _preprocess_for_ocr(img_cv: np.ndarray) -> np.ndarray:
+def _preprocess_for_ocr(img_cv: np.ndarray, method: str = "otsu") -> np.ndarray:
     """
     Full preprocessing pipeline for best OCR accuracy:
       1. Upscale if image is small (improves Tesseract character recognition)
       2. Convert to grayscale
-      3. Gaussian blur  (smooth noise before thresholding)
-      4. Denoise with Non-Local Means
-      5. Deskew (rotation correction)
-      6. Otsu binarization
+      3. Gaussian blur + Non-Local Means denoise (method="otsu" only --
+         skipped for method="adaptive", see note below)
+      4. Deskew (rotation correction)
+      5. Binarization -- method="otsu" (single global threshold, good for
+         high-contrast text) or method="adaptive" (local threshold, better
+         at preserving small/low-contrast text such as fine-print footer
+         lines that a global threshold can wash out against a light
+         background).
+
+    The blur/denoise step is skipped for method="adaptive": it is tuned to
+    help the global Otsu threshold ignore noise, but on small/thin fine
+    print it smooths away the very strokes adaptive thresholding relies on
+    to tell text from background, reintroducing the same loss of small text
+    the adaptive pass exists to avoid. Adaptive thresholding is local and
+    handles moderate pixel noise on its own, so it doesn't need the
+    pre-blur.
     """
     # 1. Upscale small images
     h, w = img_cv.shape[:2]
@@ -189,35 +201,103 @@ def _preprocess_for_ocr(img_cv: np.ndarray) -> np.ndarray:
         if len(img_cv.shape) == 3
         else img_cv.copy()
     )
-    # 3. Gaussian blur — reduces high-frequency noise before binarization
-    gray = cv2.GaussianBlur(gray, (3, 3), 0)
-    # 4. Denoise with Non-Local Means for residual noise
-    gray = cv2.fastNlMeansDenoising(gray, h=10, templateWindowSize=7, searchWindowSize=21)
+    if method != "adaptive":
+        # 3. Gaussian blur — reduces high-frequency noise before binarization
+        gray = cv2.GaussianBlur(gray, (3, 3), 0)
+        # 4. Denoise with Non-Local Means for residual noise
+        gray = cv2.fastNlMeansDenoising(gray, h=10, templateWindowSize=7, searchWindowSize=21)
     # 5. Deskew
     gray = _deskew(gray)
-    # 6. Otsu binarization
-    _, binary = cv2.threshold(gray, 0, 255, cv2.THRESH_BINARY + cv2.THRESH_OTSU)
+    # 6. Binarization
+    if method == "adaptive":
+        binary = cv2.adaptiveThreshold(
+            gray, 255, cv2.ADAPTIVE_THRESH_GAUSSIAN_C, cv2.THRESH_BINARY,
+            31, 15,
+        )
+    else:
+        _, binary = cv2.threshold(gray, 0, 255, cv2.THRESH_BINARY + cv2.THRESH_OTSU)
     return binary
+def _merge_ocr_text(primary: str, secondary: str) -> str:
+    """
+    Merge two OCR passes line-by-line, keeping `primary` as the base and
+    appending any lines found in `secondary` that have no close match in
+    `primary`. This recovers content one preprocessing method captured but
+    the other lost (e.g. small/low-contrast fine print washed out by a
+    global-threshold pass but preserved by a local-adaptive-threshold
+    pass), without discarding whichever pass captured more overall.
+    """
+    primary_norm = {
+        re.sub(r"\s+", " ", ln).strip().lower()
+        for ln in primary.splitlines() if ln.strip()
+    }
+    def _is_near_duplicate(norm: str) -> bool:
+        for p in primary_norm:
+            if norm == p:
+                return True
+            # Only treat containment as a duplicate when the two lines are
+            # close in length (minor OCR noise, e.g. a stray trailing
+            # character). A short primary line (e.g. a single word like
+            # "Forage") being a substring of a much longer secondary line
+            # is NOT the same content -- it's a short line coincidentally
+            # sharing a word with a longer, information-rich line (e.g. an
+            # "Issued by Forage" footer) that must not be discarded.
+            shorter, longer = (p, norm) if len(p) <= len(norm) else (norm, p)
+            if shorter and shorter in longer and len(shorter) >= 0.7 * len(longer):
+                return True
+        return False
+    extra_lines = []
+    for ln in secondary.splitlines():
+        s = ln.strip()
+        if not s:
+            continue
+        norm = re.sub(r"\s+", " ", s).lower()
+        if _is_near_duplicate(norm):
+            continue
+        extra_lines.append(s)
+        primary_norm.add(norm)
+    if not extra_lines:
+        return primary
+    return primary.rstrip("\n") + "\n" + "\n".join(extra_lines)
 def _ocr_image_cv(img_cv: np.ndarray) -> str:
     """
-    Run Tesseract with multiple PSM configs on a preprocessed OpenCV image.
-    Returns whichever result has the most content.
+    Run Tesseract with multiple PSM configs on the image, using two
+    preprocessing variants (global Otsu threshold with blur/denoise, and a
+    local adaptive threshold without blur/denoise) so both high-contrast
+    body text and small/faint fine print (footer codes, "issued by" lines,
+    etc.) have a chance to be captured.
+
+    The Otsu+denoise pass is used as the primary/base text: its blur/
+    denoise step is specifically tuned for the larger, higher-contrast text
+    that makes up most of a certificate (name, title, headings), so it's
+    normally the cleaner read for that content. The adaptive pass is only
+    used to recover EXTRA lines the Otsu pass missed (typically small,
+    low-contrast fine print) -- it is not allowed to overwrite lines the
+    Otsu pass already captured, since being denoise-free also makes it
+    noisier on larger text. If the Otsu pass produced little or nothing
+    (e.g. failed badly on an unusual layout/background), the roles swap so
+    a mostly-empty primary doesn't discard a working adaptive result.
     """
-    processed = _preprocess_for_ocr(img_cv)
     configs = [
         "--oem 3 --psm 6",  # Assume uniform block of text
         "--oem 3 --psm 4",  # Single column of text
         "--oem 3 --psm 3",  # Fully automatic page segmentation
     ]
-    best = ""
-    for cfg in configs:
-        try:
-            result = pytesseract.image_to_string(processed, config=cfg)
-            if len(result.strip()) > len(best.strip()):
-                best = result
-        except Exception as e:
-            logger.debug("Tesseract config %s failed: %s", cfg, e)
-    return best
+    def best_for(processed):
+        best = ""
+        for cfg in configs:
+            try:
+                result = pytesseract.image_to_string(processed, config=cfg)
+                if len(result.strip()) > len(best.strip()):
+                    best = result
+            except Exception as e:
+                logger.debug("Tesseract config %s failed: %s", cfg, e)
+        return best
+    otsu_text = best_for(_preprocess_for_ocr(img_cv, method="otsu"))
+    adaptive_text = best_for(_preprocess_for_ocr(img_cv, method="adaptive"))
+    if len(otsu_text.strip()) < 20:
+        # Otsu pass essentially failed -- fall back to adaptive as primary.
+        return _merge_ocr_text(adaptive_text, otsu_text)
+    return _merge_ocr_text(otsu_text, adaptive_text)
 def _ocr_image_with_layout(img_cv: np.ndarray) -> dict:
     """
     OCR with layout information using pytesseract.image_to_data().
@@ -541,6 +621,12 @@ def _extract_name(lines: list, full_text: str) -> str:
         "certificate", "completion", "course", "training", "university",
         "institute", "college", "program", "verified", "issued", "date",
         "director", "founder", "signature", "blockchain",
+        # Common marketing-tagline words (e.g. "Inspiring and empowering
+        # future professionals") -- short, capitalized, all-alpha lines
+        # like this otherwise satisfy every other check below and can be
+        # mistaken for the recipient's name. Mirrors the same exclusion
+        # already applied in _extract_course's equivalent branding check.
+        "inspiring", "empowering",
     }
     for idx in range(2, len(lines)):
         line = lines[idx]
@@ -577,7 +663,15 @@ _COURSE_TRIGGERS = [
     "successfully completed the course", "for successfully completing",
     "completing the course", "completed the course", "for completing",
     "completion of the course", "for the course", "for the online course",
-    "course entitled", "for the program", "has completed", "completed",
+    "course entitled", "for the program",
+    # NOTE: bare "completed" / "has completed" were deliberately removed.
+    # They are too generic -- they also match unrelated sentences that
+    # introduce a *list* rather than a single title, e.g. "... has
+    # completed practical tasks in:" followed by a bullet list of task
+    # names. Matching there caused list items (not the course title) to
+    # be picked up as high-confidence candidates. Every trigger kept above
+    # explicitly references "course"/"program", which is a much stronger,
+    # still-generalizable signal that a title follows.
 ]
 _COURSE_DEGREE_PATTERNS = [
     r"\bBachelor\s+of\s+[A-Za-z&\.\s]{2,60}",
@@ -663,36 +757,65 @@ def _extract_course(lines: list, full_text: str, university: str = "", name: str
             if m:
                 add(m.group(0), near_trigger=False, quoted=False, is_degree=True)
     # 4) Trigger phrase ("completed the course", "course entitled", ...) ->
-    #    scan forward a few lines for the title that follows it
+    #    scan forward a few lines for the title that follows it. Lines that
+    #    end with ":" are skipped as trigger sources -- a trailing colon is
+    #    a strong, layout-independent signal that the sentence introduces a
+    #    *list* of items (tasks, modules, skills, ...) rather than a single
+    #    title, so the lines that follow are not reliable title candidates.
     skip_if = ["certificate of completion", "certificate of participation"]
     for i, line in enumerate(lines):
         low = line.lower()
         if any(sk in low for sk in skip_if):
             continue
+        if low.rstrip().endswith(":"):
+            continue
         if any(trig in low for trig in _COURSE_TRIGGERS):
             for j in range(i + 1, min(i + 5, len(lines))):
                 add(lines[j], near_trigger=True, quoted=False, is_degree=False)
-    # 5) Line(s) immediately before a "Certificate of Completion" heading.
-    #    This is a weak, position-only signal -- it is frequently issuer
-    #    branding rather than the course title -- so it only gets a small
-    #    baseline score and a mild penalty, letting stronger signals above
-    #    outrank it when present.
+    # 5) Title block between the recipient's name and the certificate-type
+    #    heading (e.g. "Certificate of Completion", "Certificate of
+    #    Achievement", ...). Many certificate designs place the course/
+    #    program title directly under the recipient's name and above this
+    #    heading -- sometimes wrapped across two or more OCR lines. Both the
+    #    individual lines AND their joined-together text are added as
+    #    candidates so a wrapped title is captured as one coherent string
+    #    rather than being split into weaker fragments. This remains a
+    #    positional (not content-based) signal, so it still gets a modest
+    #    baseline score rather than an automatic win -- stronger signals
+    #    above (explicit label, quotes, degree pattern, course-specific
+    #    trigger) continue to outrank it when present.
+    heading_re = re.compile(r"certificate\s+of\s+\w+", re.IGNORECASE)
+    exclude_block = [
+        "certificate", "completion", "participant", "achievement",
+        "presented to", "awarded to", "inspiring", "empowering",
+    ]
+    name_norm = (name or "").strip().lower()
     for i, line in enumerate(lines):
-        if "certificate of completion" in line.lower():
+        if heading_re.search(line):
+            block_lines = []
             for j in range(max(0, i - 3), i):
                 cand = _clean(lines[j])
                 low = cand.lower()
-                if not cand or any(x in low for x in [
-                    "certificate", "completion", "participant",
-                    "presented to", "awarded to",
-                ]):
+                if not cand or low == name_norm or any(x in low for x in exclude_block):
                     continue
+                block_lines.append(cand)
                 s = _score_course_candidate(
                     cand, near_trigger=False, quoted=False, is_degree=False,
                     university=university, name=name,
                 )
                 if s is not None:
                     candidates.append((cand, s - 1))
+            if len(block_lines) >= 2:
+                joined = _clean(" ".join(block_lines))
+                s = _score_course_candidate(
+                    joined, near_trigger=False, quoted=False, is_degree=False,
+                    university=university, name=name,
+                )
+                if s is not None:
+                    # Slightly favored over the lone-line fragments above:
+                    # it's the more complete reconstruction of a wrapped
+                    # title, still below any content-based signal.
+                    candidates.append((joined, s + 0.5))
     if not candidates:
         return NOT_PROVIDED
     candidates.sort(key=lambda c: c[1], reverse=True)
@@ -793,11 +916,49 @@ def _extract_cert_id(full_text: str) -> str:
             if val != NOT_PROVIDED:
                 return val
     return NOT_PROVIDED
-def _extract_university(lines: list) -> str:
+_UNIVERSITY_LABELS = [
+    "issued by", "issuing authority", "issuing organization",
+    "issuing organisation", "awarding body",
+]
+def _strip_ocr_noise_prefix(text: str) -> str:
+    """
+    Drop a leading token that is pure punctuation/symbols/digits (common
+    OCR misreads of logo glyphs, bullets, or list markers, e.g. "9 Forage"
+    or "| Issued by Forage" -> "Forage" / "Issued by Forage"). Only strips
+    a single leading noise token, never touches real word content.
+    """
+    return re.sub(r"^[^A-Za-z]+(?=[A-Za-z])", "", (text or "").strip()).strip()
+def _extract_university(lines: list, full_text: str = "") -> str:
     """
     Extract issuing organization (university/company).
     Works for universities, institutes, academies, and companies.
     """
+    # 1) Explicit label, e.g. "Issued by <X>" / "Issuing Authority: <X>".
+    #    This is a common, layout-independent convention across many
+    #    certificate platforms and is checked before the positional/
+    #    keyword heuristic below since it is unambiguous when present.
+    #    "Issued by" in particular is normally followed by the org name
+    #    with no punctuation separator ("Issued by Forage", not "Issued
+    #    by: Forage"), so -- unlike the generic colon/dash-based
+    #    _label_extract -- a plain "label + value" pattern is used here.
+    #    A short, specific phrase like "issued by" is safe to match without
+    #    requiring it to start the line/be followed by a separator, unlike
+    #    single generic words (e.g. "course"), which is why this stays a
+    #    dedicated check rather than a change to _label_extract itself.
+    for line in lines:
+        for lbl in _UNIVERSITY_LABELS:
+            pat = re.compile(
+                re.escape(lbl) + r"\s*[:\-]?\s*(.+)$", re.IGNORECASE,
+            )
+            m = pat.search(line)
+            if m:
+                cleaned = _strip_ocr_noise_prefix(_clean(m.group(1)))
+                # Stop at a "|" field separator some layouts use to pack
+                # multiple labelled fields onto one printed line.
+                cleaned = cleaned.split("|")[0].strip()
+                valid = _valid(cleaned)
+                if valid != NOT_PROVIDED:
+                    return valid
     uni_keywords = (
         "university", "institute", "college", "academy",
         "school of", "department of", "faculty of"
@@ -808,7 +969,7 @@ def _extract_university(lines: list) -> str:
     )
     candidates = []
     for line in lines:
-        clean = _clean(line)
+        clean = _strip_ocr_noise_prefix(_clean(line))
         lower = clean.lower()
         # Skip short lines
         if len(clean.split()) < 1:
@@ -856,7 +1017,7 @@ def extract_details(text: str) -> dict:
     full_text = " ".join(lines)       # Single line — better for label regex
     full_text_nl = "\n".join(lines)   # With newlines — better for context
     name       = _extract_name(lines, full_text)
-    university = _extract_university(lines)
+    university = _extract_university(lines, full_text)
     course     = _extract_course(lines, full_text, university=university, name=name)
     date       = _extract_date(full_text)
     cert_id    = _extract_cert_id(full_text)
@@ -913,56 +1074,6 @@ def verify_certificate(cert_hash):
     hashes = load_hashes()
     return "VERIFIED" if cert_hash in hashes else "FAKE"
 # ----------------------------------
-# VERIFICATION RESULT DISPLAY MAPPING
-# ----------------------------------
-# result.html renders its status badge/color/label/message/confidence ring
-# from these specific variable names. verify_certificate() itself only ever
-# returns the two raw outcomes "VERIFIED" or "FAKE" -- this function's only
-# job is to translate that raw outcome into the display fields the template
-# actually reads. It does not re-implement or alter the hash/blockchain
-# verification decision in any way; that remains solely verify_certificate()'s
-# responsibility.
-def _verification_display_context(status_raw: str, details: dict) -> dict:
-    is_valid = status_raw == "VERIFIED"
-    # Extraction completeness only feeds the confidence indicator that
-    # result.html already displays -- it has no bearing on the VALID/FAKE
-    # decision above, which is determined solely by the hash lookup.
-    fields = [details.get("name"), details.get("course"),
-              details.get("date"), details.get("cert_id")]
-    extracted = sum(1 for f in fields if f and f not in (NOT_PROVIDED, "Unknown"))
-    extraction_ratio = extracted / len(fields)
-    if is_valid:
-        return {
-            "status": "VALID",
-            "color": "green",
-            "label": "Genuine Certificate",
-            "message": (
-                "This certificate's hash was found on record. "
-                "It is authentic and has not been altered."
-            ),
-            "confidence_score": round(70 + 30 * extraction_ratio, 1),
-            "explanation": (
-                "Hash matched a registered certificate; score reflects how "
-                "completely its details were read."
-            ),
-            "issuing_authority": details.get("university"),
-        }
-    return {
-        "status": "FAKE",
-        "color": "red",
-        "label": "Not Verified",
-        "message": (
-            "This certificate's hash was not found on record. "
-            "It may be fake, modified, or was never registered."
-        ),
-        "confidence_score": round(30 * extraction_ratio, 1),
-        "explanation": (
-            "Hash did not match any registered certificate; score reflects "
-            "how completely its details were read."
-        ),
-        "issuing_authority": details.get("university"),
-    }
-# ----------------------------------
 # ROUTES
 # ----------------------------------
 @app.route("/")
@@ -981,31 +1092,14 @@ def issue():
         details = extract_details(text)
         cert_hash = generate_hash(details)
         status = add_certificate(cert_hash)
-
-        if status == "ALREADY EXISTS":
-            color, label, message = (
-                "orange",
-                "Already Issued",
-                "This certificate already exists in the ledger.",
-            )
-        else:
-            color, label, message = (
-                "green",
-                "Certificate Issued",
-                "This certificate has been successfully issued and recorded on the blockchain ledger.",
-            )
-
         return render_template(
             "result.html",
-            action="ISSUE",
             status=status,
-            color=color,
-            label=label,
-            message=message,
             name=details["name"],
             course=details["course"],
             date=details["date"],
             cert_id=details["cert_id"],
+            issuing_authority=details["university"],
             hash=cert_hash,
         )
     # GET /issue renders the issue form (issue.html already exists as a
@@ -1021,17 +1115,16 @@ def verify():
         text = perform_ocr(filepath)
         details = extract_details(text)
         cert_hash = generate_hash(details)
-        status_raw = verify_certificate(cert_hash)
-        display_context = _verification_display_context(status_raw, details)
+        status = verify_certificate(cert_hash)
         return render_template(
             "result.html",
-            action="VERIFY",
+            status=status,
             name=details["name"],
             course=details["course"],
             date=details["date"],
             cert_id=details["cert_id"],
+            issuing_authority=details["university"],
             hash=cert_hash,
-            **display_context,
         )
     # GET /verify renders the verify form (verify.html already exists as a
     # template -- it is used above for the POST error path).

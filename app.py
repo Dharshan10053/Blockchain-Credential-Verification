@@ -1092,9 +1092,28 @@ def issue():
         details = extract_details(text)
         cert_hash = generate_hash(details)
         status = add_certificate(cert_hash)
+        # result.html's display fields, derived directly from the existing
+        # status values already returned by add_certificate() above
+        # ("ISSUED SUCCESSFULLY" / "ALREADY EXISTS") -- no new status
+        # system, just mapping the existing result to the fields the
+        # template already expects.
+        if status == "ISSUED SUCCESSFULLY":
+            color, label, message = (
+                "green", "Certificate Issued",
+                "This certificate has been successfully issued and recorded on the blockchain ledger.",
+            )
+        else:  # "ALREADY EXISTS"
+            color, label, message = (
+                "orange", "Already Issued",
+                "This certificate has already been issued and recorded on the blockchain ledger.",
+            )
         return render_template(
             "result.html",
             status=status,
+            action="ISSUE",
+            color=color,
+            label=label,
+            message=message,
             name=details["name"],
             course=details["course"],
             date=details["date"],
@@ -1116,9 +1135,32 @@ def verify():
         details = extract_details(text)
         cert_hash = generate_hash(details)
         status = verify_certificate(cert_hash)
+        # result.html's display fields, derived directly from the existing
+        # status values already returned by verify_certificate() above
+        # ("VERIFIED" / "FAKE") -- no new verification system, just
+        # mapping the existing binary result to the fields the template
+        # already expects. confidence_score reflects the same binary
+        # hash-match result already computed by verify_certificate().
+        if status == "VERIFIED":
+            color, label, message, confidence_score = (
+                "green", "Certificate Verified",
+                "This certificate has been verified and found on the blockchain ledger.",
+                100,
+            )
+        else:  # "FAKE"
+            color, label, message, confidence_score = (
+                "red", "Verification Failed",
+                "This certificate could not be verified against the blockchain ledger.",
+                0,
+            )
         return render_template(
             "result.html",
             status=status,
+            action="VERIFY",
+            color=color,
+            label=label,
+            message=message,
+            confidence_score=confidence_score,
             name=details["name"],
             course=details["course"],
             date=details["date"],
@@ -1145,7 +1187,7 @@ def _details_to_api(details, cert_hash):
     if date_val == "Unknown":
         date_val = details.get("year", "Unknown")
     cert_id = details.get("cert_id", "Unknown")
-    if cert_id == "Unknown":
+    if cert_id == "Unknown" or cert_id == NOT_PROVIDED:
         cert_id = "CERT-" + cert_hash[:9].upper()
     return {
         "name": details.get("name", "Unknown"),

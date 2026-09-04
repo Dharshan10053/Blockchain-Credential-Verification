@@ -569,6 +569,25 @@ def _label_extract(lines: list, full_text: str, labels: list, max_words: int = 1
 # FIELD EXTRACTORS
 # ----------------------------------
 def _extract_name(lines: list, full_text: str) -> str:
+    def person_candidate(value: str) -> str:
+        """Normalize and validate a likely person-name line from OCR."""
+        value = _clean(value).rstrip(",").strip()
+        words = value.split()
+        if not 1 <= len(words) <= 6:
+            return ""
+        rejected = {
+            "certificate", "department", "college", "university", "paper",
+            "id", "date", "principal", "convener", "hod", "signature", "dr",
+        }
+        if any(word.lower().strip(".") in rejected for word in words):
+            return ""
+        if not all(
+            re.fullmatch(r"(?:[A-Za-z]\.)+|[A-Za-z]+(?:[.'-][A-Za-z]+)*", word)
+            for word in words
+        ):
+            return ""
+        return value
+
     # 1) Label-based: "Name: ...", "Student Name: ...", etc.
     label_result = _valid(_label_extract(
         lines, full_text,
@@ -605,15 +624,11 @@ def _extract_name(lines: list, full_text: str) -> str:
                 after = _clean(after)
                 if after and 1 <= len(after.split()) <= 6:
                     return _valid(after)
-                # Next-line fallback
-                if i + 1 < len(lines):
-                    cand = _clean(lines[i + 1])
-                    words = cand.split()
-                    if (
-                        1 <= len(words) <= 6
-                        and re.search(r"[A-Za-z]", cand)
-                        and all(re.match(r"[A-Za-z'\-\.]+$", w) for w in words)
-                    ):
+                # Metadata such as a paper/certificate ID may separate the
+                # certification phrase from the recipient's name.
+                for next_idx in range(i + 1, min(i + 4, len(lines))):
+                    cand = person_candidate(lines[next_idx])
+                    if cand:
                         return _valid(cand)
                 break
     # 3) Fallback: short, capitalized, all-alpha line unlikely to be a label
@@ -664,6 +679,7 @@ _COURSE_TRIGGERS = [
     "completing the course", "completed the course", "for completing",
     "completion of the course", "for the course", "for the online course",
     "course entitled", "for the program",
+    "presented paper on", "paper on",
     # NOTE: bare "completed" / "has completed" were deliberately removed.
     # They are too generic -- they also match unrelated sentences that
     # introduce a *list* rather than a single title, e.g. "... has
@@ -845,6 +861,11 @@ def _extract_date(full_text: str) -> str:
 
     # 2) Common date formats
     date_patterns = [
+        # Date ranges such as "16th -17th September, 2022".
+        r"\b\d{1,2}(?:st|nd|rd|th)?\s*[-–—]\s*\d{1,2}(?:st|nd|rd|th)?\s+"
+        r"(?:Jan(?:uary)?|Feb(?:ruary)?|Mar(?:ch)?|Apr(?:il)?|May|"
+        r"Jun(?:e)?|Jul(?:y)?|Aug(?:ust)?|Sep(?:tember)?|Oct(?:ober)?|"
+        r"Nov(?:ember)?|Dec(?:ember)?)\s*,?\s*\d{4}\b",
         # July 30th, 2024 / March 4, 2026
         r"\b(?:Jan(?:uary)?|Feb(?:ruary)?|Mar(?:ch)?|Apr(?:il)?|May|"
         r"Jun(?:e)?|Jul(?:y)?|Aug(?:ust)?|Sep(?:tember)?|Oct(?:ober)?|"
@@ -865,13 +886,17 @@ def _extract_date(full_text: str) -> str:
         m = re.search(pat, full_text, flags=re.IGNORECASE)
 
         if m:
-            return _valid(_clean(m.group(0)))
+            value = _clean(m.group(0))
+            if re.search(r"\d(?:st|nd|rd|th)?\s*[-–—]\s*\d", value, re.IGNORECASE):
+                value = re.sub(r"\s*[-–—]\s*", "–", value)
+            return _valid(value)
 
     return NOT_PROVIDED
 
 def _extract_cert_id(full_text: str) -> str:
     # 1) Label-based
     id_labels = [
+        "paper id", "paper no", "paper number",
         "certificate no", "certificate number", "certificate id",
         "cert no", "cert id", "cert. no", "registration no",
         "registration number", "ref no", "reference no",

@@ -239,6 +239,26 @@ def test_branding_only_candidate_is_rejected_not_fabricated():
     assert "SomeCompany" not in details["course"]
 
 
+def test_paper_presentation_certificate_layout():
+    """Paper ID, initials, presentation wording, and date ranges extract generically."""
+    raw_text = (
+        "CERTIFICATE OF PARTICIPATION\n"
+        "This is to certify that\n"
+        "Paper ID : ICCIASH-2022/626\n"
+        "K. Jayanth,\n"
+        "Department of AI&ML, St. Martin's Engineering College\n"
+        "has participated and presented paper on\n"
+        "MOVIE TICKETS BOOKING MANAGEMENT SYSTEM\n"
+        "on 16th -17th September, 2022.\n"
+        "Dr. Ranadheer Reddy Donthi\n"
+    )
+    details = extract_details(raw_text)
+    assert details["name"] == "K. Jayanth", details
+    assert details["course"] == "MOVIE TICKETS BOOKING MANAGEMENT SYSTEM", details
+    assert details["cert_id"] == "ICCIASH-2022/626", details
+    assert details["date"] == "16th–17th September, 2022", details
+
+
 if __name__ == "__main__":
     tests = [
         test_real_learntube_certificate_end_to_end,
@@ -249,6 +269,7 @@ if __name__ == "__main__":
         test_forage_task_list_layout_not_confused_with_course,
         test_list_intro_trigger_line_is_not_used_as_course_source,
         test_branding_only_candidate_is_rejected_not_fabricated,
+        test_paper_presentation_certificate_layout,
     ]
     failures = 0
     for t in tests:

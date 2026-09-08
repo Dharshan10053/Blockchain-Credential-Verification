@@ -4,6 +4,7 @@ import hashlib
 import logging
 import re
 import secrets
+from datetime import datetime, timezone
 import cv2
 import numpy as np
 import pytesseract
@@ -16,6 +17,13 @@ from flask_wtf import CSRFProtect
 from flask_wtf.csrf import CSRFError
 from flask_limiter import Limiter
 from flask_limiter.util import get_remote_address
+from backend.database.db import (
+    get_certificate_by_hash,
+    init_db,
+    log_verification,
+    upsert_certificate,
+)
+from backend.utils.report_generator import generate_report
 # Load environment variables from a local .env file (see .env.example).
 # Safe to call even if no .env file exists.
 load_dotenv()
@@ -61,20 +69,20 @@ app.secret_key = _secret_key
 # ----------------------------------
 # ADMIN AUTHENTICATION (Authentication Foundation Layer)
 # ----------------------------------
-# Certificate issuance is a privileged action; verification stays public.
-# A single shared admin key is used, accepted via the `X-Admin-Key` header
-# (API clients) or the `admin_key` form field (web UI). Query-string keys are
-# never accepted: they leak into server access logs and browser history.
+# Issuance is temporarily open for local development; RBAC will replace this
+# shared-key foundation before production use. Verification stays public.
+# A single shared admin key remains available for protected admin endpoints via
+# the `X-Admin-Key` header. Query-string keys are never accepted because they
+# leak into server access logs and browser history.
 ADMIN_API_KEY = os.environ.get("ADMIN_API_KEY")
 if not ADMIN_API_KEY:
     logger.warning(
-        "ADMIN_API_KEY is not set. Certificate issuance is disabled until "
-        "an admin key is configured -- set ADMIN_API_KEY in the environment "
-        "(see .env.example). Verification remains public and unaffected."
+        "ADMIN_API_KEY is not set. Protected admin endpoints remain unavailable "
+        "until it is configured (see .env.example)."
     )
 def _admin_key_from_request():
-    """Extract the caller-supplied admin key from header or form field."""
-    return request.headers.get("X-Admin-Key") or request.form.get("admin_key")
+    """Extract the caller-supplied admin key from the request header."""
+    return request.headers.get("X-Admin-Key")
 def _is_valid_admin_key(candidate) -> bool:
     """Constant-time comparison against the configured admin key.
     Returns False (never raises) if no key is configured or none was
@@ -85,13 +93,13 @@ def _is_valid_admin_key(candidate) -> bool:
     return secrets.compare_digest(candidate, ADMIN_API_KEY)
 def _admin_key_error_message() -> str:
     if not ADMIN_API_KEY:
-        return "Certificate issuance is disabled: no admin key is configured on the server."
+        return "This protected endpoint is unavailable until an admin key is configured."
     return "A valid admin key is required to issue certificates."
 # ----------------------------------
 # UPLOAD LIMITS
 # ----------------------------------
 UPLOAD_FOLDER = "uploads"
-BLOCKCHAIN_FILE = "blockchain.txt"
+BLOCKCHAIN_FILE = os.path.join(os.path.dirname(os.path.abspath(__file__)), "blockchain.txt")
 os.makedirs(UPLOAD_FOLDER, exist_ok=True)
 ALLOWED_EXTENSIONS = {"pdf", "png", "jpg", "jpeg"}
 # Reject request bodies over 16 MB before they ever hit disk (DoS mitigation).
@@ -1107,8 +1115,6 @@ def home():
 @app.route("/issue", methods=["GET", "POST"])
 def issue():
     if request.method == "POST":
-        if not _is_valid_admin_key(_admin_key_from_request()):
-            return render_template("issue.html", error=_admin_key_error_message()), 403
         file = request.files.get("certificate")
         if not file or not allowed_file(file.filename):
             return render_template("issue.html", error="Invalid file type."), 400
@@ -1117,6 +1123,15 @@ def issue():
         details = extract_details(text)
         cert_hash = generate_hash(details)
         status = add_certificate(cert_hash)
+        init_db()
+        upsert_certificate(
+            cert_hash,
+            {
+                **details,
+                "issuing_authority": details.get("university", ""),
+            },
+            action="ISSUE",
+        )
         # result.html's display fields, derived directly from the existing
         # status values already returned by add_certificate() above
         # ("ISSUED SUCCESSFULLY" / "ALREADY EXISTS") -- no new status
@@ -1215,46 +1230,56 @@ def download_report(cert_hash):
             "The requested certificate report does not exist."
         )
 
+    init_db()
+    record = get_certificate_by_hash(cert_hash)
+    if not record:
+        return _render_error_page(
+            "errors/404.html", 404,
+            "Certificate metadata for this report does not exist."
+        )
+
     try:
-        # Generate the report in memory so no additional file/UI changes are needed.
-        pdf = fitz.open()
-        page = pdf.new_page()
-        page.insert_text(
-            (72, 80),
-            "Certificate Verification Report",
-            fontsize=20,
-        )
-        page.insert_text(
-            (72, 125),
-            "Certificate Status: VERIFIED",
-            fontsize=14,
-        )
-        page.insert_text(
-            (72, 165),
-            "Blockchain Status: Certificate hash found on the ledger.",
-            fontsize=11,
-        )
-        page.insert_text(
-            (72, 205),
-            "Certificate Hash:",
-            fontsize=11,
-        )
-        page.insert_textbox(
-            fitz.Rect(72, 220, 540, 270),
+        verification_timestamp = datetime.now(timezone.utc).isoformat()
+        log_verification(
+            "REPORT_DOWNLOAD",
             cert_hash,
-            fontsize=10,
+            "VALID",
+            request.remote_addr or "",
+            request.user_agent.string,
+            "Certificate report generated from verified blockchain record.",
         )
+        report_path = generate_report(
+            {
+                **record,
+                "hash": cert_hash,
+                "status": "VALID",
+                "label": "VERIFIED",
+                "explanation": "Certificate hash matched the blockchain ledger.",
+                "blockchain_status": "VERIFIED - hash found on the ledger",
+                "verification_timestamp": verification_timestamp,
+            },
+            os.environ.get("BASE_URL"),
+        )
+        if not report_path:
+            return _render_error_page(
+                "errors/500.html", 500,
+                "Unable to generate the certificate report."
+            )
 
-        pdf_bytes = pdf.tobytes()
-        pdf.close()
-
-        from io import BytesIO
-        return send_file(
-            BytesIO(pdf_bytes),
+        response = send_file(
+            report_path,
             mimetype="application/pdf",
             as_attachment=True,
             download_name=f"certificate_report_{cert_hash[:12]}.pdf",
         )
+
+        @response.call_on_close
+        def remove_report():
+            try:
+                os.remove(report_path)
+            except OSError:
+                logger.warning("Could not remove temporary report: %s", report_path)
+        return response
     except Exception as e:
         logger.error("PDF report generation failed: %s", e, exc_info=True)
         return _render_error_page(
@@ -1291,8 +1316,6 @@ def _details_to_api(details, cert_hash):
 @app.route("/api/issue", methods=["POST"])
 @csrf.exempt
 def api_issue():
-    if not _is_valid_admin_key(_admin_key_from_request()):
-        return jsonify({"error": _admin_key_error_message()}), 403
     file = request.files.get("certificate")
     if not file or not allowed_file(file.filename):
         return jsonify({"error": "Invalid file type"}), 400

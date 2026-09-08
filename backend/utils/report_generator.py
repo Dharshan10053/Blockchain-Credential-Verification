@@ -46,7 +46,7 @@ def generate_report(result: dict, base_url: str = None) -> str:
         # 2. Header
         c.setFillColor(colors.HexColor("#F8FAFC"))
         c.setFont("Helvetica-Bold", 24)
-        c.drawString(2*cm, height - 3*cm, "CertAuth Verification")
+        c.drawString(2*cm, height - 3*cm, "Certificate Verification Report")
         
         c.setFillColor(colors.HexColor("#9CA3AF"))
         c.setFont("Helvetica", 10)
@@ -101,6 +101,8 @@ def generate_report(result: dict, base_url: str = None) -> str:
             ("Certificate ID", cert_id),
             ("Issuing Authority", issuer),
             ("Date", date_val),
+            ("Blockchain Status", result.get("blockchain_status", "Verified")),
+            ("Verification Timestamp", result.get("verification_timestamp", "Not Available")),
             ("Confidence", f"{result.get('confidence_score', 0)}%"),
         ]
 

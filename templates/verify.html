@@ -12,6 +12,13 @@
       <p>Upload any certificate and we'll check it against the blockchain ledger. Smart fuzzy matching handles minor OCR differences automatically.</p>
     </div>
 
+    {% if error %}
+      <div class="alert alert-error fade-up">
+        <svg width="16" height="16" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><circle cx="12" cy="12" r="9"/><path d="M12 8v5M12 16h.01" stroke-linecap="round"/></svg>
+        <span>{{ error }}</span>
+      </div>
+    {% endif %}
+
     {% with messages = get_flashed_messages(with_categories=true) %}
       {% if messages %}
         {% for category, message in messages %}

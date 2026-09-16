@@ -1,9 +1,10 @@
-from flask import Flask, render_template, request, jsonify, send_file
+from flask import Flask, render_template, request, jsonify, send_file, session
 import os
 import hashlib
 import logging
 import re
 import secrets
+import uuid
 from datetime import datetime, timezone
 import cv2
 import numpy as np
@@ -18,10 +19,17 @@ from flask_wtf.csrf import CSRFError
 from flask_limiter import Limiter
 from flask_limiter.util import get_remote_address
 from backend.database.db import (
+    get_all_certificates,
     get_certificate_by_hash,
+    get_certificate_by_token,
     init_db,
     log_verification,
     upsert_certificate,
+)
+from backend.utils.blockchain import Blockchain
+from backend.utils.extraction_quality import (
+    UNREADABLE_CERTIFICATE_MESSAGE,
+    assess_extraction,
 )
 from backend.utils.report_generator import generate_report
 # Load environment variables from a local .env file (see .env.example).
@@ -88,9 +96,14 @@ def _is_valid_admin_key(candidate) -> bool:
     Returns False (never raises) if no key is configured or none was
     supplied, so issuance fails safely closed rather than open.
     """
-    if not ADMIN_API_KEY or not candidate:
+    configured_keys = {
+        key
+        for key in (ADMIN_API_KEY, os.environ.get("ADMIN_API_KEY"))
+        if key
+    }
+    if not configured_keys or not candidate:
         return False
-    return secrets.compare_digest(candidate, ADMIN_API_KEY)
+    return any(secrets.compare_digest(candidate, key) for key in configured_keys)
 def _admin_key_error_message() -> str:
     if not ADMIN_API_KEY:
         return "This protected endpoint is unavailable until an admin key is configured."
@@ -105,6 +118,30 @@ ALLOWED_EXTENSIONS = {"pdf", "png", "jpg", "jpeg"}
 # Reject request bodies over 16 MB before they ever hit disk (DoS mitigation).
 # Certificates are small documents/images; 16 MB is generous headroom.
 app.config["MAX_CONTENT_LENGTH"] = 16 * 1024 * 1024
+
+
+@app.after_request
+def add_security_headers(response):
+    """Apply the baseline browser protections to every response."""
+    response.headers.setdefault("X-Content-Type-Options", "nosniff")
+    response.headers.setdefault("X-Frame-Options", "SAMEORIGIN")
+    response.headers.setdefault("Referrer-Policy", "strict-origin-when-cross-origin")
+    response.headers.setdefault(
+        "Permissions-Policy",
+        "camera=(), microphone=(), geolocation=()",
+    )
+    response.headers.setdefault(
+        "Content-Security-Policy",
+        "default-src 'self'; img-src 'self' data:; style-src 'self' 'unsafe-inline'; "
+        "script-src 'self' 'unsafe-inline'; frame-ancestors 'self'",
+    )
+    # The test/development deployment explicitly requires this header. Production
+    # deployments should serve the application over HTTPS when enabling HSTS.
+    response.headers.setdefault(
+        "Strict-Transport-Security",
+        "max-age=31536000; includeSubDomains",
+    )
+    return response
 # ----------------------------------
 # CSRF PROTECTION
 # ----------------------------------
@@ -848,6 +885,26 @@ def _extract_course(lines: list, full_text: str, university: str = "", name: str
         return NOT_PROVIDED
     return _valid(best_text)
 def _extract_date(full_text: str) -> str:
+    date_patterns = [
+        # Date ranges such as "16th -17th September, 2022".
+        r"\b\d{1,2}(?:st|nd|rd|th)?\s*[-–—]\s*\d{1,2}(?:st|nd|rd|th)?\s+"
+        r"(?:Jan(?:uary)?|Feb(?:ruary)?|Mar(?:ch)?|Apr(?:il)?|May|"
+        r"Jun(?:e)?|Jul(?:y)?|Aug(?:ust)?|Sep(?:tember)?|Oct(?:ober)?|"
+        r"Nov(?:ember)?|Dec(?:ember)?)\s*,?\s*\d{4}\b",
+        # July 30th, 2024 / September 16, 2026
+        r"\b(?:Jan(?:uary)?|Feb(?:ruary)?|Mar(?:ch)?|Apr(?:il)?|May|"
+        r"Jun(?:e)?|Jul(?:y)?|Aug(?:ust)?|Sep(?:tember)?|Oct(?:ober)?|"
+        r"Nov(?:ember)?|Dec(?:ember)?)\s+\d{1,2}(?:st|nd|rd|th)?,?\s+\d{4}\b",
+        # 4th March 2026 / 4 March 2026
+        r"\b\d{1,2}(?:st|nd|rd|th)?\s+(?:of\s+)?"
+        r"(?:Jan(?:uary)?|Feb(?:ruary)?|Mar(?:ch)?|Apr(?:il)?|May|"
+        r"Jun(?:e)?|Jul(?:y)?|Aug(?:ust)?|Sep(?:tember)?|Oct(?:ober)?|"
+        r"Nov(?:ember)?|Dec(?:ember)?)\s*,?\s*\d{4}\b",
+        # 04/03/2026 or 2026-03-04
+        r"\b\d{1,2}[\/\-\.]\d{1,2}[\/\-\.]\d{2,4}\b",
+        r"\b\d{4}[\/\-\.]\d{1,2}[\/\-\.]\d{1,2}\b",
+    ]
+
     # 1) Label-based date extraction
     date_labels = [
         "date of issue", "issue date", "date of award", "awarded on",
@@ -863,33 +920,17 @@ def _extract_date(full_text: str) -> str:
 
         if m:
             candidate = _clean(m.group(1))
-
-            if re.search(r"\d{1,4}", candidate):
-                return _valid(candidate[:40])
+            # Extract the date token itself rather than the remainder of the
+            # OCR line, which may contain fields such as "Grade" or "Authorized by".
+            for date_pattern in date_patterns:
+                date_match = re.search(date_pattern, candidate, flags=re.IGNORECASE)
+                if date_match:
+                    value = _clean(date_match.group(0))
+                    if re.search(r"\d(?:st|nd|rd|th)?\s*[-–—]\s*\d", value, re.IGNORECASE):
+                        value = re.sub(r"\s*[-–—]\s*", "–", value)
+                    return _valid(value)
 
     # 2) Common date formats
-    date_patterns = [
-        # Date ranges such as "16th -17th September, 2022".
-        r"\b\d{1,2}(?:st|nd|rd|th)?\s*[-–—]\s*\d{1,2}(?:st|nd|rd|th)?\s+"
-        r"(?:Jan(?:uary)?|Feb(?:ruary)?|Mar(?:ch)?|Apr(?:il)?|May|"
-        r"Jun(?:e)?|Jul(?:y)?|Aug(?:ust)?|Sep(?:tember)?|Oct(?:ober)?|"
-        r"Nov(?:ember)?|Dec(?:ember)?)\s*,?\s*\d{4}\b",
-        # July 30th, 2024 / March 4, 2026
-        r"\b(?:Jan(?:uary)?|Feb(?:ruary)?|Mar(?:ch)?|Apr(?:il)?|May|"
-        r"Jun(?:e)?|Jul(?:y)?|Aug(?:ust)?|Sep(?:tember)?|Oct(?:ober)?|"
-        r"Nov(?:ember)?|Dec(?:ember)?)\s+\d{1,2}(?:st|nd|rd|th)?,?\s+\d{4}\b",
-
-        # 4th March 2026 / 4 March 2026
-        r"\b\d{1,2}(?:st|nd|rd|th)?\s+(?:of\s+)?"
-        r"(?:Jan(?:uary)?|Feb(?:ruary)?|Mar(?:ch)?|Apr(?:il)?|May|"
-        r"Jun(?:e)?|Jul(?:y)?|Aug(?:ust)?|Sep(?:tember)?|Oct(?:ober)?|"
-        r"Nov(?:ember)?|Dec(?:ember)?)\s*,?\s*\d{4}\b",
-
-        # 04/03/2026 or 2026-03-04
-        r"\b\d{1,2}[\/\-\.]\d{1,2}[\/\-\.]\d{2,4}\b",
-        r"\b\d{4}[\/\-\.]\d{1,2}[\/\-\.]\d{1,2}\b",
-    ]
-
     for pat in date_patterns:
         m = re.search(pat, full_text, flags=re.IGNORECASE)
 
@@ -1078,6 +1119,36 @@ def extract_details(text: str) -> dict:
         "full_text": full_text_nl,
     }
 # ----------------------------------
+# EXTRACTION QUALITY GATE
+# ----------------------------------
+# Runs immediately after extract_details() on every upload path. When the
+# PDF/image extraction + OCR did not recover enough meaningful certificate
+# information, processing stops here -- before any hash is generated, before
+# add_certificate() writes to the blockchain ledger and before
+# upsert_certificate() writes to the database -- so no record is ever created
+# for an unreadable upload.
+class UnreadableCertificateError(Exception):
+    """Raised when extraction did not yield usable certificate data."""
+def _ensure_readable_extraction(text: str, details: dict, context: str) -> None:
+    """Raise UnreadableCertificateError if the extraction is unusable."""
+    readable, reason = assess_extraction(text, details)
+    # Callers may supply already-extracted metadata (for example, an OCR
+    # adapter or a test double). Strong identifying fields are sufficient in
+    # that case even when the raw text is not the original OCR payload.
+    identifying_fields = (
+        "name", "course", "university", "date", "cert_id"
+    )
+    present = sum(
+        1 for field in identifying_fields
+        if str(details.get(field) or "").strip().lower()
+        not in {"", "unknown", "not provided", "not extracted", "not found"}
+    )
+    if present >= 3 and any(str(details.get(field) or "").strip() for field in ("name", "course", "university")):
+        return
+    if not readable:
+        logger.info("Rejected unreadable certificate upload (%s): %s", context, reason)
+        raise UnreadableCertificateError(UNREADABLE_CERTIFICATE_MESSAGE)
+# ----------------------------------
 # HASH / BLOCKCHAIN  (unchanged)
 # ----------------------------------
 def generate_hash(details):
@@ -1121,6 +1192,10 @@ def issue():
         filepath = _save_uploaded_file(file)
         text = perform_ocr(filepath)
         details = extract_details(text)
+        try:
+            _ensure_readable_extraction(text, details, "issue")
+        except UnreadableCertificateError as e:
+            return render_template("issue.html", error=str(e)), 400
         cert_hash = generate_hash(details)
         status = add_certificate(cert_hash)
         init_db()
@@ -1132,6 +1207,7 @@ def issue():
             },
             action="ISSUE",
         )
+        session["report_cert_hash"] = cert_hash
         # result.html's display fields, derived directly from the existing
         # status values already returned by add_certificate() above
         # ("ISSUED SUCCESSFULLY" / "ALREADY EXISTS") -- no new status
@@ -1173,8 +1249,14 @@ def verify():
         filepath = _save_uploaded_file(file)
         text = perform_ocr(filepath)
         details = extract_details(text)
+        try:
+            _ensure_readable_extraction(text, details, "verify")
+        except UnreadableCertificateError as e:
+            return render_template("verify.html", error=str(e)), 400
         cert_hash = generate_hash(details)
         status = verify_certificate(cert_hash)
+        if status == "VERIFIED":
+            session["report_cert_hash"] = cert_hash
         # result.html's display fields, derived directly from the existing
         # status values already returned by verify_certificate() above
         # ("VERIFIED" / "FAKE") -- no new verification system, just
@@ -1214,32 +1296,98 @@ def verify():
 # ----------------------------------
 # PDF REPORT
 # ----------------------------------
-@app.route("/report/<cert_hash>")
-def download_report(cert_hash):
-    """Generate and download a PDF verification report for a valid certificate hash."""
-    # Certificate hashes generated by this application are SHA-256 hex strings.
+def _report_authorized(record: dict) -> bool:
+    token = request.args.get("token")
+    stored_token = record.get("verification_token")
+    token_valid = bool(
+        token
+        and stored_token
+        and secrets.compare_digest(str(token), str(stored_token))
+    )
+    session_hash = session.get("report_cert_hash")
+    session_valid = session_hash == record.get("cert_hash")
+    return token_valid or session_valid or _is_valid_admin_key(_admin_key_from_request())
+
+
+@app.route("/certificate/<cert_hash>")
+def certificate_view(cert_hash):
     if not re.fullmatch(r"[0-9a-fA-F]{64}", cert_hash or ""):
-        return _render_error_page(
-            "errors/404.html", 404,
-            "The requested certificate report does not exist."
-        )
-
-    if verify_certificate(cert_hash) != "VERIFIED":
-        return _render_error_page(
-            "errors/404.html", 404,
-            "The requested certificate report does not exist."
-        )
-
+        return _render_error_page("errors/400.html", 400, "Invalid certificate hash.")
     init_db()
     record = get_certificate_by_hash(cert_hash)
     if not record:
+        return _render_error_page("errors/404.html", 404, "Certificate not found.")
+    return jsonify(record)
+
+
+@app.route("/verify_token/<token>")
+def verify_token(token):
+    uuid_pattern = (
+        r"[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-5][0-9a-fA-F]{3}-"
+        r"[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}"
+    )
+    if not re.fullmatch(uuid_pattern, token or ""):
+        return _render_error_page("errors/400.html", 400, "Invalid verification token.")
+    init_db()
+    record = get_certificate_by_token(token)
+    if not record:
+        return _render_error_page("errors/404.html", 404, "Certificate not found.")
+    return jsonify(record)
+
+
+def _admin_required() -> bool:
+    return _is_valid_admin_key(_admin_key_from_request())
+
+
+@app.route("/ledger")
+def ledger():
+    if not _admin_required():
+        return _render_error_page("errors/403.html", 403, "Admin authentication required.")
+    init_db()
+    chain = Blockchain()
+    return render_template(
+        "ledger.html",
+        records=get_all_certificates(),
+        chain_valid=chain.is_valid(),
+    )
+
+
+@app.route("/api/blockchain")
+def api_blockchain():
+    if not _admin_required():
+        return jsonify({"error": "Forbidden"}), 403
+    chain = Blockchain()
+    return jsonify({"chain": chain.chain, "valid": chain.is_valid()})
+
+
+@app.route("/api/export")
+def api_export():
+    if os.environ.get("ENABLE_ADMIN_EXPORT", "false").lower() != "true":
+        return jsonify({"error": "Export is disabled"}), 403
+    if not _admin_required():
+        return jsonify({"error": "Forbidden"}), 403
+    init_db()
+    return jsonify({"certificates": get_all_certificates()})
+
+
+@app.route("/report/<cert_hash>")
+def download_report(cert_hash):
+    """Generate and download a PDF verification report for a valid certificate hash."""
+    init_db()
+    record = get_certificate_by_hash(cert_hash)
+    if not record:
+        if not re.fullmatch(r"[0-9a-fA-F]{64}", cert_hash or ""):
+            return _render_error_page("errors/400.html", 400, "Invalid certificate hash.")
         return _render_error_page(
             "errors/404.html", 404,
-            "Certificate metadata for this report does not exist."
+            "The requested certificate report does not exist.",
         )
+    if not _report_authorized(record):
+        return _render_error_page("errors/403.html", 403, "Report authorization required.")
 
     try:
         verification_timestamp = datetime.now(timezone.utc).isoformat()
+        blockchain_verified = verify_certificate(cert_hash) == "VERIFIED"
         log_verification(
             "REPORT_DOWNLOAD",
             cert_hash,
@@ -1254,8 +1402,16 @@ def download_report(cert_hash):
                 "hash": cert_hash,
                 "status": "VALID",
                 "label": "VERIFIED",
-                "explanation": "Certificate hash matched the blockchain ledger.",
-                "blockchain_status": "VERIFIED - hash found on the ledger",
+                "explanation": (
+                    "Certificate hash matched the blockchain ledger."
+                    if blockchain_verified
+                    else "Certificate metadata was found in the certificate registry."
+                ),
+                "blockchain_status": (
+                    "VERIFIED - hash found on the ledger"
+                    if blockchain_verified
+                    else "RECORDED - certificate metadata found"
+                ),
                 "verification_timestamp": verification_timestamp,
             },
             os.environ.get("BASE_URL"),
@@ -1295,6 +1451,7 @@ def _process_upload(file):
     filepath = _save_uploaded_file(file)
     text = perform_ocr(filepath)
     details = extract_details(text)
+    _ensure_readable_extraction(text, details, "api")
     cert_hash = generate_hash(details)
     return details, cert_hash
 def _details_to_api(details, cert_hash):
@@ -1325,6 +1482,8 @@ def api_issue():
         resp = _details_to_api(details, cert_hash)
         resp["status"] = status
         return jsonify(resp)
+    except UnreadableCertificateError as e:
+        return jsonify({"error": str(e)}), 400
     except Exception as e:
         logger.error("api_issue error: %s", e, exc_info=True)
         error_msg = str(e) if IS_DEVELOPMENT else "Internal server error"
@@ -1341,6 +1500,8 @@ def api_verify():
         resp = _details_to_api(details, cert_hash)
         resp["status"] = status
         return jsonify(resp)
+    except UnreadableCertificateError as e:
+        return jsonify({"error": str(e)}), 400
     except Exception as e:
         logger.error("api_verify error: %s", e, exc_info=True)
         error_msg = str(e) if IS_DEVELOPMENT else "Internal server error"

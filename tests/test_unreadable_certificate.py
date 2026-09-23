@@ -11,13 +11,17 @@ The OCR/text-extraction stage (perform_ocr) is stubbed so the tests exercise
 the validation gate deterministically, without Tesseract/Poppler binaries or
 sample image fixtures.
 """
+import hashlib
 import io
+import json
 import os
+import secrets
 
 os.environ.setdefault("FLASK_ENV", "development")
 os.environ.setdefault("SECRET_KEY", "test-secret-key-for-extraction-gate-tests")
 
 import pytest
+from werkzeug.security import generate_password_hash
 
 import app as app_module
 from backend.database import db as db_module
@@ -54,11 +58,11 @@ NO_DETAILS_TEXT = (
 
 @pytest.fixture
 def client(tmp_path, monkeypatch):
-    """Flask test client with CSRF/rate limiting off and isolated storage."""
+    """Flask test client with CSRF/rate limiting off, isolated storage, and ADMIN session."""
     app_module.app.config["TESTING"] = True
     app_module.app.config["WTF_CSRF_ENABLED"] = False
     monkeypatch.setattr(
-        app_module, "BLOCKCHAIN_FILE", str(tmp_path / "blockchain.txt")
+        app_module, "BLOCKCHAIN_FILE", str(tmp_path / "blockchain.json")
     )
     monkeypatch.setattr(
         app_module, "UPLOAD_FOLDER", str(tmp_path / "uploads"), raising=False
@@ -68,18 +72,41 @@ def client(tmp_path, monkeypatch):
     app_module.limiter.enabled = False
     try:
         with app_module.app.test_client() as test_client:
+            # Bootstrap an admin user in the isolated DB and log in
+            with app_module.app.app_context():
+                db_module.init_db()
+                db_module.create_user("admin_test", generate_password_hash("password"), "ADMIN")
+            # Authenticate via browser session
+            test_client.post("/login", data={"username": "admin_test", "password": "password"})
+            # Also create a DB-backed API key for API route tests
+            with app_module.app.app_context():
+                user = db_module.get_user_by_username("admin_test")
+                raw_key = secrets.token_hex(32)
+                key_hash = hashlib.sha256(raw_key.encode()).hexdigest()
+                db_module.create_api_key(user["id"], key_hash)
+            test_client._admin_api_key = raw_key
             yield test_client
     finally:
         app_module.limiter.enabled = True
 
 
 def _upload(client, url, text, monkeypatch, filename="certificate.png"):
-    """POST a dummy file with perform_ocr stubbed to return `text`."""
+    """POST a dummy file with perform_ocr stubbed to return `text`.
+
+    For /api/issue uses DB-backed X-Api-Key; for browser /issue relies on session.
+    /verify routes are public and need no auth header.
+    """
     monkeypatch.setattr(app_module, "perform_ocr", lambda filepath: text)
+    headers = None
+    if "/api/issue" in url:
+        # API route — authenticate with DB-backed API key
+        headers = {"X-Api-Key": getattr(client, "_admin_api_key", "")}
+    # /issue (browser) relies on session cookie already set in the fixture
     return client.post(
         url,
         data={"certificate": (io.BytesIO(b"dummy-image-bytes"), filename)},
         content_type="multipart/form-data",
+        headers=headers,
     )
 
 
@@ -87,7 +114,12 @@ def _stored_hashes(client):
     if not os.path.exists(app_module.BLOCKCHAIN_FILE):
         return []
     with open(app_module.BLOCKCHAIN_FILE) as handle:
-        return [line for line in handle.read().splitlines() if line.strip()]
+        chain = json.load(handle).get("chain", [])
+    return [
+        block["data"]["hash"]
+        for block in chain[1:]
+        if isinstance(block.get("data"), dict) and block["data"].get("hash")
+    ]
 
 
 # ---------------------------------------------------------------------------

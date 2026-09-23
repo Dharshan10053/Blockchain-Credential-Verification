@@ -62,10 +62,38 @@ def init_db():
             )
         """)
         
+        # Create users table
+        conn.execute("""
+            CREATE TABLE IF NOT EXISTS users (
+                id              INTEGER PRIMARY KEY AUTOINCREMENT,
+                username        TEXT UNIQUE NOT NULL,
+                password_hash   TEXT NOT NULL,
+                role            TEXT NOT NULL,
+                is_active       INTEGER DEFAULT 1,
+                created_at      TEXT NOT NULL,
+                last_login      TEXT
+            )
+        """)
+
+        # Create api_keys table
+        conn.execute("""
+            CREATE TABLE IF NOT EXISTS api_keys (
+                id              INTEGER PRIMARY KEY AUTOINCREMENT,
+                user_id         INTEGER NOT NULL,
+                key_hash        TEXT UNIQUE NOT NULL,
+                created_at      TEXT NOT NULL,
+                last_used_at    TEXT,
+                revoked_at      TEXT,
+                FOREIGN KEY(user_id) REFERENCES users(id)
+            )
+        """)
+        
         # Add performance indices
         conn.execute("CREATE INDEX IF NOT EXISTS idx_cert_hash ON certificates(cert_hash)")
         conn.execute("CREATE INDEX IF NOT EXISTS idx_verification_token ON certificates(verification_token)")
         conn.execute("CREATE INDEX IF NOT EXISTS idx_audit_timestamp ON audit_logs(timestamp)")
+        conn.execute("CREATE INDEX IF NOT EXISTS idx_username ON users(username)")
+        conn.execute("CREATE INDEX IF NOT EXISTS idx_api_key_hash ON api_keys(key_hash)")
         
         conn.commit()
     logger.info("Database initialised at %s", _DB_PATH)
@@ -159,3 +187,87 @@ def archive_old_logs(days_to_keep: int = 90):
         conn.commit()
     logger.info(f"Archived {deleted_count} audit logs older than {days_to_keep} days.")
     return deleted_count
+
+# ---------------------------------------------------------
+# Authentication & User Management
+# ---------------------------------------------------------
+
+def create_user(username: str, password_hash: str, role: str) -> bool:
+    """Create a new user. Returns True if successful, False if username exists."""
+    now = datetime.now(timezone.utc).isoformat()
+    try:
+        with _connect() as conn:
+            conn.execute("""
+                INSERT INTO users (username, password_hash, role, created_at)
+                VALUES (?, ?, ?, ?)
+            """, (username, password_hash, role, now))
+            conn.commit()
+        return True
+    except sqlite3.IntegrityError:
+        return False
+
+def get_user_by_username(username: str) -> dict | None:
+    with _connect() as conn:
+        row = conn.execute("SELECT * FROM users WHERE username = ?", (username,)).fetchone()
+    return dict(row) if row else None
+
+def get_user_by_id(user_id: int) -> dict | None:
+    with _connect() as conn:
+        row = conn.execute("SELECT * FROM users WHERE id = ?", (user_id,)).fetchone()
+    return dict(row) if row else None
+
+def update_last_login(user_id: int):
+    now = datetime.now(timezone.utc).isoformat()
+    with _connect() as conn:
+        conn.execute("UPDATE users SET last_login = ? WHERE id = ?", (now, user_id))
+        conn.commit()
+
+def create_api_key(user_id: int, key_hash: str) -> int:
+    now = datetime.now(timezone.utc).isoformat()
+    with _connect() as conn:
+        cursor = conn.execute("""
+            INSERT INTO api_keys (user_id, key_hash, created_at)
+            VALUES (?, ?, ?)
+        """, (user_id, key_hash, now))
+        conn.commit()
+        return cursor.lastrowid
+
+def revoke_api_key(key_hash: str) -> bool:
+    """Revoke an API key by its stored hash."""
+    now = datetime.now(timezone.utc).isoformat()
+    with _connect() as conn:
+        cursor = conn.execute(
+            """
+            UPDATE api_keys
+            SET revoked_at = COALESCE(revoked_at, ?)
+            WHERE key_hash = ?
+            """,
+            (now, key_hash),
+        )
+        conn.commit()
+    return cursor.rowcount > 0
+
+def get_user_by_api_key_hash(key_hash: str) -> dict | None:
+    """Find a valid API key by its hash and return the associated user."""
+    with _connect() as conn:
+        # Check if the key exists and is not revoked
+        key_row = conn.execute("""
+            SELECT user_id, revoked_at FROM api_keys WHERE key_hash = ?
+        """, (key_hash,)).fetchone()
+        
+        if not key_row or key_row["revoked_at"] is not None:
+            return None
+            
+        user_id = key_row["user_id"]
+        # Update last_used_at
+        now = datetime.now(timezone.utc).isoformat()
+        conn.execute("UPDATE api_keys SET last_used_at = ? WHERE key_hash = ?", (now, key_hash))
+        
+        # Get user
+        user_row = conn.execute("SELECT * FROM users WHERE id = ?", (user_id,)).fetchone()
+        conn.commit()
+        
+    if not user_row or not user_row["is_active"]:
+        return None
+        
+    return dict(user_row)

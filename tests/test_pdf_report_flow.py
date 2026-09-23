@@ -6,9 +6,11 @@ import fitz
 import app as app_module
 from app import app
 from backend.database import db
+from werkzeug.security import generate_password_hash
 
 
 def _post_issue(client):
+    """POST to /issue using an already-authenticated client."""
     form = client.get("/issue")
     token = re.search(
         r'name="csrf_token"[^>]*value="([^"]+)"',
@@ -57,7 +59,17 @@ def test_browser_issue_verify_report_contains_certificate_metadata(monkeypatch, 
     monkeypatch.setattr(app_module, "perform_ocr", lambda filepath: "report fixture")
     monkeypatch.setattr(app_module, "extract_details", lambda text: details)
     monkeypatch.setattr(app_module, "generate_hash", lambda extracted: cert_hash)
+
+    app.config["TESTING"] = True
+    app.config["WTF_CSRF_ENABLED"] = False
+
     with app.test_client() as client:
+        # Create admin user and authenticate via session
+        with app.app_context():
+            db.init_db()
+            db.create_user("report_admin", generate_password_hash("password"), "ADMIN")
+        client.post("/login", data={"username": "report_admin", "password": "password"})
+
         issue_response = _post_issue(client)
         assert issue_response.status_code == 200
         assert b"Certificate Issued" in issue_response.data

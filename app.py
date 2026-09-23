@@ -1,4 +1,4 @@
-from flask import Flask, render_template, request, jsonify, send_file, session
+from flask import Flask, render_template, request, jsonify, send_file, session, redirect, url_for
 import os
 import hashlib
 import logging
@@ -6,6 +6,7 @@ import re
 import secrets
 import uuid
 from datetime import datetime, timezone
+from urllib.parse import urlsplit, urlunsplit
 import cv2
 import numpy as np
 import pytesseract
@@ -32,6 +33,10 @@ from backend.utils.extraction_quality import (
     assess_extraction,
 )
 from backend.utils.report_generator import generate_report
+from backend.utils.auth import login_required, require_role, get_current_user
+from datetime import timedelta
+import werkzeug.security
+
 # Load environment variables from a local .env file (see .env.example).
 # Safe to call even if no .env file exists.
 load_dotenv()
@@ -74,45 +79,19 @@ if not _secret_key:
         )
     _secret_key = secrets.token_hex(32)
 app.secret_key = _secret_key
-# ----------------------------------
-# ADMIN AUTHENTICATION (Authentication Foundation Layer)
-# ----------------------------------
-# Issuance is temporarily open for local development; RBAC will replace this
-# shared-key foundation before production use. Verification stays public.
-# A single shared admin key remains available for protected admin endpoints via
-# the `X-Admin-Key` header. Query-string keys are never accepted because they
-# leak into server access logs and browser history.
-ADMIN_API_KEY = os.environ.get("ADMIN_API_KEY")
-if not ADMIN_API_KEY:
-    logger.warning(
-        "ADMIN_API_KEY is not set. Protected admin endpoints remain unavailable "
-        "until it is configured (see .env.example)."
-    )
-def _admin_key_from_request():
-    """Extract the caller-supplied admin key from the request header."""
-    return request.headers.get("X-Admin-Key")
-def _is_valid_admin_key(candidate) -> bool:
-    """Constant-time comparison against the configured admin key.
-    Returns False (never raises) if no key is configured or none was
-    supplied, so issuance fails safely closed rather than open.
-    """
-    configured_keys = {
-        key
-        for key in (ADMIN_API_KEY, os.environ.get("ADMIN_API_KEY"))
-        if key
-    }
-    if not configured_keys or not candidate:
-        return False
-    return any(secrets.compare_digest(candidate, key) for key in configured_keys)
-def _admin_key_error_message() -> str:
-    if not ADMIN_API_KEY:
-        return "This protected endpoint is unavailable until an admin key is configured."
-    return "A valid admin key is required to issue certificates."
+app.config.update(
+    SESSION_COOKIE_SECURE=True,
+    SESSION_COOKIE_HTTPONLY=True,
+    SESSION_COOKIE_SAMESITE='Lax',
+    PERMANENT_SESSION_LIFETIME=timedelta(hours=24)
+)
+
 # ----------------------------------
 # UPLOAD LIMITS
 # ----------------------------------
 UPLOAD_FOLDER = "uploads"
-BLOCKCHAIN_FILE = os.path.join(os.path.dirname(os.path.abspath(__file__)), "blockchain.txt")
+BLOCKCHAIN_FILE = os.path.join(os.path.dirname(os.path.abspath(__file__)), "blockchain.json")
+LEGACY_BLOCKCHAIN_FILE = os.path.join(os.path.dirname(os.path.abspath(__file__)), "blockchain.txt")
 os.makedirs(UPLOAD_FOLDER, exist_ok=True)
 ALLOWED_EXTENSIONS = {"pdf", "png", "jpg", "jpeg"}
 # Reject request bodies over 16 MB before they ever hit disk (DoS mitigation).
@@ -1162,28 +1141,73 @@ def generate_hash(details):
     cert_hash = hashlib.sha256(data_string.encode()).hexdigest()
     logger.info("Generated Hash: %s", cert_hash)
     return cert_hash
-def load_hashes():
-    if not os.path.exists(BLOCKCHAIN_FILE):
-        return set()
-    with open(BLOCKCHAIN_FILE, "r") as f:
-        return set(f.read().splitlines())
-def add_certificate(cert_hash):
-    hashes = load_hashes()
-    if cert_hash in hashes:
+def _get_blockchain():
+    canonical_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), "blockchain.json")
+    legacy_path = LEGACY_BLOCKCHAIN_FILE if os.path.abspath(BLOCKCHAIN_FILE) == canonical_path else None
+    return Blockchain(BLOCKCHAIN_FILE, legacy_path=legacy_path)
+
+def add_certificate(cert_hash, details=None):
+    blockchain = _get_blockchain()
+    if blockchain.find_by_hash(cert_hash):
         return "ALREADY EXISTS"
-    with open(BLOCKCHAIN_FILE, "a") as f:
-        f.write(cert_hash + "\n")
+    blockchain.add_block({
+        **(details or {}),
+        "hash": cert_hash,
+    })
     return "ISSUED SUCCESSFULLY"
 def verify_certificate(cert_hash):
-    hashes = load_hashes()
-    return "VERIFIED" if cert_hash in hashes else "FAKE"
+    return "VERIFIED" if _get_blockchain().find_by_hash(cert_hash) else "FAKE"
 # ----------------------------------
 # ROUTES
 # ----------------------------------
 @app.route("/")
 def home():
     return render_template("index.html")
+
+@app.route("/login", methods=["GET", "POST"])
+@limiter.limit("5 per minute", methods=["POST"])
+def login():
+    if request.method == "POST":
+        username = request.form.get("username")
+        password = request.form.get("password")
+        
+        from backend.database.db import get_user_by_username, update_last_login
+        user = get_user_by_username(username)
+        
+        if user and user["is_active"] and werkzeug.security.check_password_hash(user["password_hash"], password):
+            session.clear() # Prevent session fixation
+            session["user_id"] = user["id"]
+            session.permanent = True
+            update_last_login(user["id"])
+            logger.info(f"User '{username}' logged in successfully.")
+            next_url = request.args.get("next")
+            if next_url:
+                parsed = urlsplit(next_url)
+                if parsed.scheme or parsed.netloc:
+                    if parsed.scheme != request.scheme or parsed.netloc != request.host:
+                        next_url = None
+                    else:
+                        next_url = urlunsplit(("", "", parsed.path or "/", parsed.query, parsed.fragment))
+                if next_url and (
+                    not next_url.startswith("/")
+                    or next_url.startswith("//")
+                    or next_url.startswith("/\\")
+                ):
+                    next_url = None
+            return redirect(next_url or url_for("home"))
+            
+        logger.warning(f"Failed login attempt for username: {username}")
+        # Generic error message
+        return render_template("login.html", error="Invalid username or password."), 401
+        
+    return render_template("login.html")
+
+@app.route("/logout", methods=["POST"])
+def logout():
+    session.clear()
+    return redirect(url_for("home"))
 @app.route("/issue", methods=["GET", "POST"])
+@require_role(["ADMIN"])
 def issue():
     if request.method == "POST":
         file = request.files.get("certificate")
@@ -1197,7 +1221,7 @@ def issue():
         except UnreadableCertificateError as e:
             return render_template("issue.html", error=str(e)), 400
         cert_hash = generate_hash(details)
-        status = add_certificate(cert_hash)
+        status = add_certificate(cert_hash, details)
         init_db()
         upsert_certificate(
             cert_hash,
@@ -1306,8 +1330,11 @@ def _report_authorized(record: dict) -> bool:
     )
     session_hash = session.get("report_cert_hash")
     session_valid = session_hash == record.get("cert_hash")
-    return token_valid or session_valid or _is_valid_admin_key(_admin_key_from_request())
-
+    
+    user = get_current_user()
+    is_admin = bool(user and user.get("role") == "ADMIN")
+    
+    return token_valid or session_valid or is_admin
 
 @app.route("/certificate/<cert_hash>")
 def certificate_view(cert_hash):
@@ -1317,7 +1344,12 @@ def certificate_view(cert_hash):
     record = get_certificate_by_hash(cert_hash)
     if not record:
         return _render_error_page("errors/404.html", 404, "Certificate not found.")
-    return jsonify(record)
+    public_fields = {
+        key: value
+        for key, value in record.items()
+        if key != "verification_token"
+    }
+    return jsonify(public_fields)
 
 
 @app.route("/verify_token/<token>")
@@ -1335,14 +1367,9 @@ def verify_token(token):
     return jsonify(record)
 
 
-def _admin_required() -> bool:
-    return _is_valid_admin_key(_admin_key_from_request())
-
-
 @app.route("/ledger")
+@require_role(["ADMIN"])
 def ledger():
-    if not _admin_required():
-        return _render_error_page("errors/403.html", 403, "Admin authentication required.")
     init_db()
     chain = Blockchain()
     return render_template(
@@ -1353,19 +1380,17 @@ def ledger():
 
 
 @app.route("/api/blockchain")
+@require_role(["ADMIN"])
 def api_blockchain():
-    if not _admin_required():
-        return jsonify({"error": "Forbidden"}), 403
     chain = Blockchain()
     return jsonify({"chain": chain.chain, "valid": chain.is_valid()})
 
 
 @app.route("/api/export")
+@require_role(["ADMIN"])
 def api_export():
     if os.environ.get("ENABLE_ADMIN_EXPORT", "false").lower() != "true":
         return jsonify({"error": "Export is disabled"}), 403
-    if not _admin_required():
-        return jsonify({"error": "Forbidden"}), 403
     init_db()
     return jsonify({"certificates": get_all_certificates()})
 
@@ -1471,6 +1496,7 @@ def _details_to_api(details, cert_hash):
         "hash": cert_hash,
     }
 @app.route("/api/issue", methods=["POST"])
+@require_role(["ADMIN"])
 @csrf.exempt
 def api_issue():
     file = request.files.get("certificate")
@@ -1478,7 +1504,7 @@ def api_issue():
         return jsonify({"error": "Invalid file type"}), 400
     try:
         details, cert_hash = _process_upload(file)
-        status = add_certificate(cert_hash)
+        status = add_certificate(cert_hash, details)
         resp = _details_to_api(details, cert_hash)
         resp["status"] = status
         return jsonify(resp)

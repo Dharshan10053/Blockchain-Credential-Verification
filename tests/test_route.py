@@ -42,9 +42,17 @@ def test_download_report():
         assert response.status_code == 403
         
         # 4. With admin key -> 200 OK
-        os.environ["ADMIN_API_KEY"] = "super-secret-admin-key"
-        response = client.get(f'/report/{mock_hash}', headers={"X-Admin-Key": "super-secret-admin-key"})
-        assert response.status_code == 200
+        # NOTE: Save and restore ADMIN_API_KEY to avoid polluting env for other tests
+        original_admin_key = os.environ.get("ADMIN_API_KEY")
+        try:
+            os.environ["ADMIN_API_KEY"] = "super-secret-admin-key"
+            response = client.get(f'/report/{mock_hash}', headers={"X-Admin-Key": "super-secret-admin-key"})
+            assert response.status_code == 200
+        finally:
+            if original_admin_key is not None:
+                os.environ["ADMIN_API_KEY"] = original_admin_key
+            else:
+                os.environ.pop("ADMIN_API_KEY", None)
         
         # 5. With incorrect admin key -> 403 Forbidden
         response = client.get(f'/report/{mock_hash}', headers={"X-Admin-Key": "wrong-key"})

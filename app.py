@@ -885,6 +885,26 @@ def _extract_course(lines: list, full_text: str, university: str = "", name: str
         return NOT_PROVIDED
     return _valid(best_text)
 def _extract_date(full_text: str) -> str:
+    date_patterns = [
+        # Date ranges such as "16th -17th September, 2022".
+        r"\b\d{1,2}(?:st|nd|rd|th)?\s*[-–—]\s*\d{1,2}(?:st|nd|rd|th)?\s+"
+        r"(?:Jan(?:uary)?|Feb(?:ruary)?|Mar(?:ch)?|Apr(?:il)?|May|"
+        r"Jun(?:e)?|Jul(?:y)?|Aug(?:ust)?|Sep(?:tember)?|Oct(?:ober)?|"
+        r"Nov(?:ember)?|Dec(?:ember)?)\s*,?\s*\d{4}\b",
+        # July 30th, 2024 / September 16, 2026
+        r"\b(?:Jan(?:uary)?|Feb(?:ruary)?|Mar(?:ch)?|Apr(?:il)?|May|"
+        r"Jun(?:e)?|Jul(?:y)?|Aug(?:ust)?|Sep(?:tember)?|Oct(?:ober)?|"
+        r"Nov(?:ember)?|Dec(?:ember)?)\s+\d{1,2}(?:st|nd|rd|th)?,?\s+\d{4}\b",
+        # 4th March 2026 / 4 March 2026
+        r"\b\d{1,2}(?:st|nd|rd|th)?\s+(?:of\s+)?"
+        r"(?:Jan(?:uary)?|Feb(?:ruary)?|Mar(?:ch)?|Apr(?:il)?|May|"
+        r"Jun(?:e)?|Jul(?:y)?|Aug(?:ust)?|Sep(?:tember)?|Oct(?:ober)?|"
+        r"Nov(?:ember)?|Dec(?:ember)?)\s*,?\s*\d{4}\b",
+        # 04/03/2026 or 2026-03-04
+        r"\b\d{1,2}[\/\-\.]\d{1,2}[\/\-\.]\d{2,4}\b",
+        r"\b\d{4}[\/\-\.]\d{1,2}[\/\-\.]\d{1,2}\b",
+    ]
+
     # 1) Label-based date extraction
     date_labels = [
         "date of issue", "issue date", "date of award", "awarded on",
@@ -900,33 +920,17 @@ def _extract_date(full_text: str) -> str:
 
         if m:
             candidate = _clean(m.group(1))
-
-            if re.search(r"\d{1,4}", candidate):
-                return _valid(candidate[:40])
+            # Extract the date token itself rather than the remainder of the
+            # OCR line, which may contain fields such as "Grade" or "Authorized by".
+            for date_pattern in date_patterns:
+                date_match = re.search(date_pattern, candidate, flags=re.IGNORECASE)
+                if date_match:
+                    value = _clean(date_match.group(0))
+                    if re.search(r"\d(?:st|nd|rd|th)?\s*[-–—]\s*\d", value, re.IGNORECASE):
+                        value = re.sub(r"\s*[-–—]\s*", "–", value)
+                    return _valid(value)
 
     # 2) Common date formats
-    date_patterns = [
-        # Date ranges such as "16th -17th September, 2022".
-        r"\b\d{1,2}(?:st|nd|rd|th)?\s*[-–—]\s*\d{1,2}(?:st|nd|rd|th)?\s+"
-        r"(?:Jan(?:uary)?|Feb(?:ruary)?|Mar(?:ch)?|Apr(?:il)?|May|"
-        r"Jun(?:e)?|Jul(?:y)?|Aug(?:ust)?|Sep(?:tember)?|Oct(?:ober)?|"
-        r"Nov(?:ember)?|Dec(?:ember)?)\s*,?\s*\d{4}\b",
-        # July 30th, 2024 / March 4, 2026
-        r"\b(?:Jan(?:uary)?|Feb(?:ruary)?|Mar(?:ch)?|Apr(?:il)?|May|"
-        r"Jun(?:e)?|Jul(?:y)?|Aug(?:ust)?|Sep(?:tember)?|Oct(?:ober)?|"
-        r"Nov(?:ember)?|Dec(?:ember)?)\s+\d{1,2}(?:st|nd|rd|th)?,?\s+\d{4}\b",
-
-        # 4th March 2026 / 4 March 2026
-        r"\b\d{1,2}(?:st|nd|rd|th)?\s+(?:of\s+)?"
-        r"(?:Jan(?:uary)?|Feb(?:ruary)?|Mar(?:ch)?|Apr(?:il)?|May|"
-        r"Jun(?:e)?|Jul(?:y)?|Aug(?:ust)?|Sep(?:tember)?|Oct(?:ober)?|"
-        r"Nov(?:ember)?|Dec(?:ember)?)\s*,?\s*\d{4}\b",
-
-        # 04/03/2026 or 2026-03-04
-        r"\b\d{1,2}[\/\-\.]\d{1,2}[\/\-\.]\d{2,4}\b",
-        r"\b\d{4}[\/\-\.]\d{1,2}[\/\-\.]\d{1,2}\b",
-    ]
-
     for pat in date_patterns:
         m = re.search(pat, full_text, flags=re.IGNORECASE)
 

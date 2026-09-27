@@ -1,11 +1,16 @@
-from flask import Flask, render_template, request, jsonify, send_file, session
+from flask import Flask, render_template, request, jsonify, send_file, session, redirect, url_for
 import os
 import hashlib
 import logging
 import re
 import secrets
 import uuid
-from datetime import datetime, timezone
+import pyotp
+from email.message import EmailMessage
+import smtplib
+import ssl
+from datetime import datetime, timezone, timedelta
+from urllib.parse import urlsplit, urlunsplit
 import cv2
 import numpy as np
 import pytesseract
@@ -13,6 +18,7 @@ from PIL import Image
 from pdf2image import convert_from_path
 import fitz  # PyMuPDF
 from werkzeug.utils import secure_filename
+from werkzeug.security import check_password_hash, generate_password_hash
 from dotenv import load_dotenv
 from flask_wtf import CSRFProtect
 from flask_wtf.csrf import CSRFError

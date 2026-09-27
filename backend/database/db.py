@@ -6,6 +6,8 @@ import logging
 import os
 import sqlite3
 import uuid
+import hashlib
+import json
 from datetime import datetime, timezone
 
 logger = logging.getLogger(__name__)
@@ -66,6 +68,47 @@ def init_db():
         conn.execute("CREATE INDEX IF NOT EXISTS idx_cert_hash ON certificates(cert_hash)")
         conn.execute("CREATE INDEX IF NOT EXISTS idx_verification_token ON certificates(verification_token)")
         conn.execute("CREATE INDEX IF NOT EXISTS idx_audit_timestamp ON audit_logs(timestamp)")
+        conn.execute("""
+            CREATE TABLE IF NOT EXISTS users (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                username TEXT UNIQUE NOT NULL,
+                email TEXT UNIQUE,
+                password_hash TEXT NOT NULL,
+                role TEXT NOT NULL DEFAULT 'VERIFIER',
+                email_verified INTEGER NOT NULL DEFAULT 0,
+                totp_secret TEXT,
+                totp_enabled INTEGER NOT NULL DEFAULT 0,
+                recovery_codes TEXT,
+                is_active INTEGER NOT NULL DEFAULT 1,
+                auth_version INTEGER NOT NULL DEFAULT 0,
+                created_at TEXT NOT NULL,
+                last_login TEXT
+            )
+        """)
+        for column, definition in (
+            ("email", "TEXT"), ("email_verified", "INTEGER NOT NULL DEFAULT 0"),
+            ("totp_secret", "TEXT"), ("totp_enabled", "INTEGER NOT NULL DEFAULT 0"),
+            ("recovery_codes", "TEXT"), ("is_active", "INTEGER NOT NULL DEFAULT 1"),
+            ("auth_version", "INTEGER NOT NULL DEFAULT 0"),
+            ("last_login", "TEXT"),
+        ):
+            try:
+                conn.execute(f"ALTER TABLE users ADD COLUMN {column} {definition}")
+            except sqlite3.OperationalError:
+                pass
+        conn.execute("""
+            CREATE TABLE IF NOT EXISTS auth_tokens (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                user_id INTEGER NOT NULL,
+                purpose TEXT NOT NULL,
+                token_hash TEXT UNIQUE NOT NULL,
+                expires_at TEXT NOT NULL,
+                used_at TEXT,
+                created_at TEXT NOT NULL,
+                FOREIGN KEY(user_id) REFERENCES users(id)
+            )
+        """)
+        conn.execute("CREATE INDEX IF NOT EXISTS idx_auth_token_hash ON auth_tokens(token_hash)")
         
         conn.commit()
     logger.info("Database initialised at %s", _DB_PATH)
@@ -159,3 +202,119 @@ def archive_old_logs(days_to_keep: int = 90):
         conn.commit()
     logger.info(f"Archived {deleted_count} audit logs older than {days_to_keep} days.")
     return deleted_count
+
+
+def create_user(username, password_hash, role="VERIFIER", email=None):
+    now = datetime.now(timezone.utc).isoformat()
+    try:
+        with _connect() as conn:
+            conn.execute(
+                """INSERT INTO users
+                   (username, email, password_hash, role, created_at)
+                   VALUES (?, ?, ?, ?, ?)""",
+                (username, email, password_hash, role, now),
+            )
+            conn.commit()
+        return True
+    except sqlite3.IntegrityError:
+        return False
+
+
+def get_user_by_username(username):
+    with _connect() as conn:
+        row = conn.execute("SELECT * FROM users WHERE username = ?", (username,)).fetchone()
+    return dict(row) if row else None
+
+
+def get_user_by_email(email):
+    with _connect() as conn:
+        row = conn.execute("SELECT * FROM users WHERE lower(email) = lower(?)", (email,)).fetchone()
+    return dict(row) if row else None
+
+
+def get_user_by_id(user_id):
+    with _connect() as conn:
+        row = conn.execute("SELECT * FROM users WHERE id = ?", (user_id,)).fetchone()
+    return dict(row) if row else None
+
+
+def set_user_password(user_id, password_hash):
+    with _connect() as conn:
+        conn.execute(
+            "UPDATE users SET password_hash = ?, auth_version = auth_version + 1 WHERE id = ?",
+            (password_hash, user_id),
+        )
+        conn.commit()
+
+
+def update_user_email_verified(user_id):
+    with _connect() as conn:
+        conn.execute("UPDATE users SET email_verified = 1 WHERE id = ?", (user_id,))
+        conn.commit()
+
+
+def update_user_totp(user_id, secret, recovery_codes):
+    with _connect() as conn:
+        conn.execute(
+            """UPDATE users SET totp_secret = ?, totp_enabled = 1, recovery_codes = ?,
+               auth_version = auth_version + 1 WHERE id = ?""",
+            (secret, json.dumps(recovery_codes), user_id),
+        )
+        row = conn.execute("SELECT auth_version FROM users WHERE id = ?", (user_id,)).fetchone()
+        conn.commit()
+        return row["auth_version"]
+
+
+def consume_recovery_code(user_id, code_hash):
+    with _connect() as conn:
+        row = conn.execute("SELECT recovery_codes FROM users WHERE id = ?", (user_id,)).fetchone()
+        if not row or not row["recovery_codes"]:
+            return False
+        codes = json.loads(row["recovery_codes"])
+        if code_hash not in codes:
+            return False
+        codes.remove(code_hash)
+        conn.execute("UPDATE users SET recovery_codes = ? WHERE id = ?", (json.dumps(codes), user_id))
+        conn.commit()
+        return True
+
+
+def create_auth_token(user_id, purpose, raw_token, expires_at):
+    now = datetime.now(timezone.utc).isoformat()
+    token_hash = hashlib.sha256(raw_token.encode()).hexdigest()
+    with _connect() as conn:
+        # Only the newest link for a given account and purpose is valid.
+        conn.execute(
+            """UPDATE auth_tokens SET used_at = ?
+               WHERE user_id = ? AND purpose = ? AND used_at IS NULL""",
+            (now, user_id, purpose),
+        )
+        conn.execute(
+            """INSERT INTO auth_tokens
+               (user_id, purpose, token_hash, expires_at, created_at)
+               VALUES (?, ?, ?, ?, ?)""",
+            (user_id, purpose, token_hash, expires_at, now),
+        )
+        conn.commit()
+
+
+def consume_auth_token(raw_token, purpose):
+    token_hash = hashlib.sha256(raw_token.encode()).hexdigest()
+    now = datetime.now(timezone.utc).isoformat()
+    with _connect() as conn:
+        row = conn.execute(
+            """SELECT id, user_id, expires_at, used_at FROM auth_tokens
+               WHERE token_hash = ? AND purpose = ?""",
+            (token_hash, purpose),
+        ).fetchone()
+        if not row or row["used_at"] or row["expires_at"] <= now:
+            return None
+        conn.execute("UPDATE auth_tokens SET used_at = ? WHERE id = ?", (now, row["id"]))
+        conn.execute(
+            """UPDATE auth_tokens SET used_at = ?
+               WHERE user_id = (SELECT user_id FROM auth_tokens WHERE id = ?)
+                 AND purpose = ? AND id != ? AND used_at IS NULL""",
+            (now, row["id"], purpose, row["id"]),
+        )
+        conn.commit()
+        return row["user_id"]

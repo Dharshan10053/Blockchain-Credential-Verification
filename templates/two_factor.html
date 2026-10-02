@@ -1,0 +1,35 @@
+{% extends "base.html" %}
+{% block title %}Two-Factor Authentication{% endblock %}
+
+{% block content %}
+<div class="container page-wrap">
+  <div class="section-label fade-up">Account</div>
+  <div class="upload-header fade-up fade-up-1">
+    <h1>Two-Factor Authentication</h1>
+    <p>Enter the 6-digit code from your authenticator app. One of your saved recovery codes also works, and is used up as soon as it is accepted.</p>
+  </div>
+
+  {% if error %}
+    <div class="alert alert-error fade-up">
+      <svg width="16" height="16" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><circle cx="12" cy="12" r="9"/><path d="M12 8v5M12 16h.01" stroke-linecap="round"/></svg>
+      <span>{{ error }}</span>
+    </div>
+  {% endif %}
+
+  <div class="card card-padded fade-up fade-up-2">
+    <form method="POST" action="{{ url_for('two_factor_verify') }}">
+      <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+
+      <div style="margin-bottom:1.5rem;">
+        <label for="code" style="display:block; margin-bottom:0.5rem;">Authentication code</label>
+        <input type="text" id="code" name="code" required autocomplete="one-time-code" inputmode="numeric"
+               style="width:100%; padding:0.75rem; border-radius:8px; border:1px solid rgba(255,255,255,0.15); background:rgba(255,255,255,0.05); color:inherit;">
+      </div>
+
+      <button type="submit" class="btn btn-primary btn-lg btn-full">
+        <span class="btn-text">Verify</span>
+      </button>
+    </form>
+  </div>
+</div>
+{% endblock %}

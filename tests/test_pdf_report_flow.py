@@ -1,11 +1,14 @@
 import io
 import re
+import uuid
 
 import fitz
+from werkzeug.security import generate_password_hash
 
 import app as app_module
 from app import app
 from backend.database import db
+from backend.database.db import create_user, get_user_by_username, init_db
 from backend.utils.blockchain import Blockchain
 
 
@@ -59,6 +62,13 @@ def test_browser_issue_verify_report_contains_certificate_metadata(monkeypatch, 
     monkeypatch.setattr(app_module, "extract_details", lambda text: details)
     monkeypatch.setattr(app_module, "generate_hash", lambda extracted: cert_hash)
     with app.test_client() as client:
+        init_db()
+        username = f"report-verifier-{uuid.uuid4().hex}"
+        assert create_user(username, generate_password_hash("test password"), "VERIFIER")
+        user = get_user_by_username(username)
+        with client.session_transaction() as user_session:
+            user_session["user_id"] = user["id"]
+            user_session["auth_version"] = user["auth_version"]
         issue_response = _post_issue(client)
         assert issue_response.status_code == 200
         assert b"Certificate Issued" in issue_response.data

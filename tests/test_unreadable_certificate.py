@@ -18,14 +18,17 @@ os.environ.setdefault("FLASK_ENV", "development")
 os.environ.setdefault("SECRET_KEY", "test-secret-key-for-extraction-gate-tests")
 
 import pytest
+import uuid
 
 import app as app_module
 from backend.database import db as db_module
+from backend.database.db import create_user, get_user_by_username
 from backend.utils.blockchain import Blockchain
 from backend.utils.extraction_quality import (
     UNREADABLE_CERTIFICATE_MESSAGE,
     assess_extraction,
 )
+from werkzeug.security import generate_password_hash
 
 READABLE_CERTIFICATE_TEXT = """
 ACME TRAINING ACADEMY
@@ -58,7 +61,7 @@ def client(tmp_path, monkeypatch):
     """Flask test client with CSRF/rate limiting off and isolated storage."""
     app_module.app.config["TESTING"] = True
     app_module.app.config["WTF_CSRF_ENABLED"] = False
-    monkeypatch.setattr(
+    monkeypatch.setitem(
         app_module.app.config, "BLOCKCHAIN_PATH", str(tmp_path / "blockchain.json")
     )
     monkeypatch.setattr(
@@ -69,6 +72,13 @@ def client(tmp_path, monkeypatch):
     app_module.limiter.enabled = False
     try:
         with app_module.app.test_client() as test_client:
+            db_module.init_db()
+            username = f"issue-verifier-{uuid.uuid4().hex}"
+            assert create_user(username, generate_password_hash("test password"), "VERIFIER")
+            user = get_user_by_username(username)
+            with test_client.session_transaction() as user_session:
+                user_session["user_id"] = user["id"]
+                user_session["auth_version"] = user["auth_version"]
             yield test_client
     finally:
         app_module.limiter.enabled = True
@@ -77,10 +87,12 @@ def client(tmp_path, monkeypatch):
 def _upload(client, url, text, monkeypatch, filename="certificate.png"):
     """POST a dummy file with perform_ocr stubbed to return `text`."""
     monkeypatch.setattr(app_module, "perform_ocr", lambda filepath: text)
+    headers = {"X-Admin-Key": "test-admin-key-12345"} if url == "/api/issue" else {}
     return client.post(
         url,
         data={"certificate": (io.BytesIO(b"dummy-image-bytes"), filename)},
         content_type="multipart/form-data",
+        headers=headers,
     )
 
 

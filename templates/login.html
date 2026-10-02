@@ -1,0 +1,106 @@
+{% extends "base.html" %}
+{% block title %}Login{% endblock %}
+
+{% block content %}
+<div class="container page-wrap">
+  <div class="section-label fade-up">Account</div>
+  <div class="upload-header fade-up fade-up-1">
+    <h1>Secure Login</h1>
+    <p>Sign in to manage issuance. Accounts with two-factor authentication enabled are asked for a one-time code after the password step.</p>
+  </div>
+
+  {% if error %}
+    <div class="alert alert-error fade-up">
+      <svg width="16" height="16" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><circle cx="12" cy="12" r="9"/><path d="M12 8v5M12 16h.01" stroke-linecap="round"/></svg>
+      <span>{{ error }}</span>
+    </div>
+  {% endif %}
+
+  {% with messages = get_flashed_messages(with_categories=true) %}
+    {% if messages %}
+      {% for category, message in messages %}
+        <div class="alert {{ 'alert-error' if category == 'error' else 'alert-success' }} fade-up">
+          <span>{{ message }}</span>
+        </div>
+      {% endfor %}
+    {% endif %}
+  {% endwith %}
+
+  <div class="card card-padded fade-up fade-up-2">
+    <form method="POST" action="{{ url_for('login', next=next_url or '') }}" id="login-form">
+      <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+
+      <div style="margin-bottom:1.25rem;">
+        <label for="username" style="display:block; margin-bottom:0.5rem;">Username</label>
+        <input type="text" id="username" name="username" required autocomplete="username"
+               style="width:100%; padding:0.75rem; border-radius:8px; border:1px solid rgba(255,255,255,0.15); background:rgba(255,255,255,0.05); color:inherit;">
+      </div>
+
+      <div style="margin-bottom:1.5rem;">
+        <label for="password" style="display:block; margin-bottom:0.5rem;">Password</label>
+        <input type="password" id="password" name="password" required autocomplete="current-password"
+               style="width:100%; padding:0.75rem; border-radius:8px; border:1px solid rgba(255,255,255,0.15); background:rgba(255,255,255,0.05); color:inherit;">
+      </div>
+
+      <button type="submit" class="btn btn-primary btn-lg btn-full">
+        <span class="btn-text">Login</span>
+      </button>
+    </form>
+
+    <details style="margin-top:1.5rem;">
+      <summary style="cursor:pointer;">Resend verification email or reset password</summary>
+
+      <form id="resend-form" method="POST" action="{{ url_for('resend_verification') }}" style="margin-top:1rem;">
+        <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+        <label for="resend-email" style="display:block; margin-bottom:0.5rem;">Email — resend verification</label>
+        <input type="email" id="resend-email" name="email" required autocomplete="email"
+               style="width:100%; padding:0.75rem; border-radius:8px; border:1px solid rgba(255,255,255,0.15); background:rgba(255,255,255,0.05); color:inherit;">
+        <button type="submit" class="btn btn-secondary btn-full" style="margin-top:0.75rem;">
+          <span class="btn-text">Resend verification</span>
+        </button>
+      </form>
+
+      <form id="forgot-form" method="POST" action="{{ url_for('forgot_password') }}" style="margin-top:1rem;">
+        <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+        <label for="forgot-email" style="display:block; margin-bottom:0.5rem;">Email — send password reset link</label>
+        <input type="email" id="forgot-email" name="email" required autocomplete="email"
+               style="width:100%; padding:0.75rem; border-radius:8px; border:1px solid rgba(255,255,255,0.15); background:rgba(255,255,255,0.05); color:inherit;">
+        <button type="submit" class="btn btn-secondary btn-full" style="margin-top:0.75rem;">
+          <span class="btn-text">Send reset link</span>
+        </button>
+      </form>
+
+      <div id="auth-message" class="alert fade-up" style="display:none; margin-top:1rem;"></div>
+    </details>
+  </div>
+</div>
+{% endblock %}
+
+{% block scripts %}
+<script>
+  // Both helper endpoints always answer with the same generic message, so the
+  // page cannot be used to learn whether an account exists.
+  (function () {
+    var message = document.getElementById("auth-message");
+    if (!message) { return; }
+    ["resend-form", "forgot-form"].forEach(function (id) {
+      var form = document.getElementById(id);
+      form.addEventListener("submit", function (event) {
+        event.preventDefault();
+        fetch(form.action, { method: "POST", body: new FormData(form) })
+          .then(function (response) { return response.json().catch(function () { return {}; }); })
+          .then(function (data) {
+            message.textContent = data.message || "Request received. Check your inbox.";
+            message.className = "alert alert-success fade-up";
+            message.style.display = "block";
+          })
+          .catch(function () {
+            message.textContent = "Unable to reach the server. Please try again.";
+            message.className = "alert alert-error fade-up";
+            message.style.display = "block";
+          });
+      });
+    });
+  })();
+</script>
+{% endblock %}

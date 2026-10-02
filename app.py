@@ -1,9 +1,10 @@
-from flask import Flask, render_template, request, jsonify, send_file, session, redirect, url_for
+from flask import Flask, render_template, request, jsonify, send_file, session, redirect, url_for, flash
 import os
 import hashlib
 import logging
 import re
 import secrets
+import sqlite3
 import uuid
 import pyotp
 from email.message import EmailMessage
@@ -31,6 +32,16 @@ from backend.database.db import (
     init_db,
     log_verification,
     upsert_certificate,
+    create_auth_token,
+    create_user,
+    consume_auth_token,
+    consume_recovery_code,
+    get_user_by_email,
+    get_user_by_id,
+    get_user_by_username,
+    set_user_password,
+    update_user_email_verified,
+    update_user_totp,
 )
 from backend.utils.blockchain import Blockchain, migrate_legacy_text_ledger
 from backend.utils.extraction_quality import (
@@ -174,6 +185,466 @@ limiter = Limiter(
     default_limits=["200 per day", "50 per hour"],
     storage_uri="memory://",
 )
+app.config["AUTH_BASE_URL"] = (
+    os.environ.get("AUTH_BASE_URL") or os.environ.get("BASE_URL", "")
+).rstrip("/")
+
+
+def _canonical_auth_url(endpoint, **values):
+    """Build bearer-token links only from the configured HTTPS origin."""
+    configured = app.config["AUTH_BASE_URL"]
+    parsed = urlsplit(configured)
+    if (
+        parsed.scheme != "https"
+        or not parsed.hostname
+        or parsed.username
+        or parsed.password
+        or parsed.query
+        or parsed.fragment
+    ):
+        raise RuntimeError("AUTH_BASE_URL must be a configured HTTPS URL.")
+    route = url_for(endpoint, **values)
+    return urlunsplit((parsed.scheme, parsed.netloc, f"{parsed.path.rstrip('/')}{route}", "", ""))
+
+
+# ----------------------------------
+# AUTHENTICATION SESSION HELPERS
+# ----------------------------------
+# The two authentication states this application understands:
+#   * fully authenticated -- "user_id" + "auth_version", and
+#   * half authenticated -- "pending_2fa_*", which is only allowed to submit a
+#     TOTP or recovery code and never grants access to any authenticated route.
+AUTH_SESSION_KEYS = (
+    "user_id",
+    "auth_version",
+    "pending_2fa_user_id",
+    "pending_auth_version",
+    "pending_2fa_started_at",
+    "pending_next_url",
+    "pending_totp_secret",
+    "pending_recovery_codes",
+    "totp_setup_auth_at",
+)
+# A half-authenticated (awaiting second factor) session must complete promptly;
+# after this window the password has to be entered again.
+PENDING_2FA_MAX_AGE = timedelta(minutes=10)
+# A generated-but-not-yet-enabled TOTP secret has to be proven with a code from
+# the authenticator app within this window.
+TOTP_SETUP_MAX_AGE = timedelta(minutes=5)
+
+
+def _clear_auth_session():
+    """Drop every authentication-related key from the session."""
+    for key in AUTH_SESSION_KEYS:
+        session.pop(key, None)
+
+
+def _timestamp_is_recent(value, max_age):
+    """True when `value` is an ISO-8601 timestamp within `max_age` of now.
+
+    Fails closed: missing, malformed or naive timestamps count as expired.
+    """
+    try:
+        stamp = datetime.fromisoformat(value)
+    except (TypeError, ValueError):
+        return False
+    if stamp.tzinfo is None:
+        stamp = stamp.replace(tzinfo=timezone.utc)
+    return datetime.now(timezone.utc) - stamp <= max_age
+
+
+def _prefers_html():
+    """True only when the client explicitly advertises text/html.
+
+    The authentication endpoints answer programmatic clients with JSON (their
+    original contract); browsers get the rendered template instead of a JSON
+    blob, and the test/API clients are unaffected.
+    """
+    return "text/html" in (request.headers.get("Accept") or "").lower()
+
+
+def _safe_next_url(candidate):
+    """Return a safe same-origin redirect target for `candidate`, else None.
+
+    This is the redirect hardening this project already used for its login
+    flow: a bare relative path is accepted, an absolute URL only when both its
+    scheme *and* host match the current request, and anything a browser could
+    re-interpret as protocol-relative ("//evil.example") or backslash-escaped
+    ("/\\evil.example") is rejected. The second-factor step reuses this exact
+    helper, so the carried-over destination can never be more permissive than
+    the direct login path.
+    """
+    if not candidate:
+        return None
+    parsed = urlsplit(candidate)
+    if parsed.scheme or parsed.netloc:
+        if parsed.scheme != request.scheme or parsed.netloc != request.host:
+            return None
+        candidate = urlunsplit(("", "", parsed.path or "/", parsed.query, parsed.fragment))
+    if (
+        not candidate.startswith("/")
+        or candidate.startswith("//")
+        or candidate.startswith("/\\")
+    ):
+        return None
+    return candidate
+
+
+def _pending_two_factor_key():
+    """Rate-limit second-factor submissions per pending account.
+
+    The default limiter key is the client address, which an attacker can
+    rotate. Keying on the account that is waiting for its second factor
+    throttles TOTP guessing against a specific account from anywhere.
+    """
+    return f"2fa:{session.get('pending_2fa_user_id') or get_remote_address()}"
+
+
+def _password_is_acceptable(password):
+    """The project's existing minimum password rule (>= 8 characters)."""
+    return isinstance(password, str) and len(password) >= 8
+
+
+def _authenticated_issuer():
+    """Return the active session user when their role permits certificate issuance."""
+    user_id = session.get("user_id")
+    if user_id is None:
+        return None
+    init_db()
+    user = get_user_by_id(user_id)
+    if (
+        user is None
+        or not user["is_active"]
+        or user["role"] not in {"VERIFIER", "ADMIN"}
+        or session.get("auth_version") != user["auth_version"]
+        or (user["email"] and not user["email_verified"])
+    ):
+        return None
+    return user
+
+
+@app.before_request
+def validate_authenticated_session():
+    """Reject session state that no longer matches the server-side record.
+
+    A monotonically increasing `auth_version` backs password resets, 2FA
+    changes and any other event that must invalidate existing cookies, so a
+    stolen cookie stops working after such an event. Half-authenticated
+    second-factor state also expires instead of lingering indefinitely.
+    """
+    user_id = session.get("user_id")
+    pending_user_id = session.get("pending_2fa_user_id")
+    if user_id is None and pending_user_id is None:
+        return None
+    if user_id is None and not _timestamp_is_recent(
+        session.get("pending_2fa_started_at"), PENDING_2FA_MAX_AGE
+    ):
+        _clear_auth_session()
+        return None
+    session_user_id = user_id if user_id is not None else pending_user_id
+    session_version = (
+        session.get("auth_version")
+        if user_id is not None
+        else session.get("pending_auth_version")
+    )
+    try:
+        init_db()
+        user = get_user_by_id(session_user_id)
+    except sqlite3.Error:
+        # Fail closed: an unreadable user store must never look like a login.
+        logger.error("User store unavailable while validating a session.", exc_info=True)
+        user = None
+    if user is None or session_version != user["auth_version"]:
+        _clear_auth_session()
+    return None
+
+
+def _auth_token(user_id, purpose, lifetime):
+    """Create a cryptographically random, single-use, expiring token."""
+    raw = secrets.token_urlsafe(32)
+    create_auth_token(
+        user_id,
+        purpose,
+        raw,
+        (datetime.now(timezone.utc) + lifetime).isoformat(),
+    )
+    return raw
+
+
+def _send_auth_email(address, subject, body):
+    """Send an authentication email over the configured SMTP transport.
+
+    Deliberately raises on transport/configuration problems: `_send_auth_link()`
+    is the request-facing wrapper that converts them into a logged warning, so a
+    broken mail server can never turn an authentication request into a 500.
+    """
+    host = os.environ.get("SMTP_HOST")
+    if not host:
+        logger.warning("SMTP is not configured; authentication email was not sent.")
+        return False
+    username = os.environ.get("SMTP_USERNAME")
+    password = os.environ.get("SMTP_PASSWORD")
+    if not username or not password:
+        raise RuntimeError("SMTP credentials are not configured.")
+    message = EmailMessage()
+    message["Subject"] = subject
+    message["From"] = os.environ.get("SMTP_FROM", "")
+    message["To"] = address
+    message.set_content(body)
+    with smtplib.SMTP(host, int(os.environ.get("SMTP_PORT", "587")), timeout=10) as server:
+        server.starttls(context=ssl.create_default_context())
+        server.login(username, password)
+        server.send_message(message)
+    return True
+
+
+def _send_auth_link(recipient, subject, endpoint, **values):
+    """Build a canonical HTTPS link and email it, never raising to the caller.
+
+    The message body carries a single-use bearer token, so any failure is logged
+    as a generic warning only -- the link (and with it the token) is never
+    written to the logs.
+    """
+    try:
+        body = _canonical_auth_url(endpoint, **values)
+    except RuntimeError:
+        logger.warning(
+            "AUTH_BASE_URL is not a configured HTTPS origin; "
+            "the authentication email was not sent."
+        )
+        return False
+    try:
+        return _send_auth_email(recipient, subject, body)
+    except Exception:
+        logger.warning(
+            "Authentication email delivery failed; continuing without sending it.",
+            exc_info=IS_DEVELOPMENT,
+        )
+        return False
+
+
+@app.route("/login", methods=["GET", "POST"])
+@limiter.limit("5 per minute", methods=["POST"])
+def login():
+    init_db()
+    if request.method == "POST":
+        username = request.form.get("username", "").strip()
+        # Only a pre-validated, same-origin destination is ever carried forward.
+        next_url = _safe_next_url(request.args.get("next"))
+        user = get_user_by_username(username)
+        if not user or not user["is_active"] or not check_password_hash(
+            user["password_hash"], request.form.get("password", "")
+        ):
+            return render_template(
+                "login.html", error="Invalid username or password.", next_url=next_url
+            ), 401
+        if user["email"] and not user["email_verified"]:
+            return render_template(
+                "login.html",
+                error="Please verify your email before signing in.",
+                next_url=next_url,
+            ), 403
+        # Rotate the session before storing any identity: this is what stops a
+        # pre-login cookie from being promoted to an authenticated one.
+        session.clear()
+        if user["totp_enabled"]:
+            # Half-authenticated state only -- no "user_id" is granted until a
+            # valid TOTP or recovery code is presented.
+            session["pending_2fa_user_id"] = user["id"]
+            session["pending_auth_version"] = user["auth_version"]
+            session["pending_2fa_started_at"] = datetime.now(timezone.utc).isoformat()
+            if next_url:
+                session["pending_next_url"] = next_url
+            return redirect(url_for("two_factor_verify"))
+        session["user_id"] = user["id"]
+        session["auth_version"] = user["auth_version"]
+        session.permanent = True
+        return redirect(next_url or url_for("home"))
+    return render_template("login.html", next_url=_safe_next_url(request.args.get("next")))
+
+
+@app.route("/logout", methods=["POST"])
+def logout():
+    session.clear()
+    return redirect(url_for("home"))
+
+
+@app.route("/register", methods=["POST"])
+@limiter.limit("5 per hour", methods=["POST"])
+def register():
+    init_db()
+    username = request.form.get("username", "").strip()
+    email = request.form.get("email", "").strip().lower()
+    password = request.form.get("password", "")
+    if not username or "@" not in email or not _password_is_acceptable(password):
+        return jsonify({"error": "Invalid registration details"}), 400
+    if create_user(username, generate_password_hash(password), "VERIFIER", email):
+        user = get_user_by_email(email)
+        if user:
+            token = _auth_token(user["id"], "email_verification", timedelta(hours=24))
+            _send_auth_link(email, "Verify your CertAuth account", "verify_email", token=token)
+    # The response is identical whether or not the account already existed, so
+    # this endpoint cannot be used to enumerate registered emails/usernames.
+    return jsonify({"message": "If registration succeeded, check your email to verify the account."}), 202
+
+
+@app.route("/verify-email/<token>")
+def verify_email(token):
+    # Single-use: consume_auth_token() only succeeds for an unused, unexpired
+    # token whose SHA-256 hash is on file.
+    user_id = consume_auth_token(token, "email_verification")
+    if user_id is None:
+        if _prefers_html():
+            flash("That verification link is invalid or has expired.", "error")
+            return redirect(url_for("login"))
+        return jsonify({"error": "Invalid or expired verification link"}), 400
+    update_user_email_verified(user_id)
+    if _prefers_html():
+        flash("Email verified. You can sign in now.", "success")
+        return redirect(url_for("login"))
+    return jsonify({"message": "Email verified"})
+
+
+@app.route("/resend-verification", methods=["POST"])
+@limiter.limit("3 per hour", methods=["POST"])
+def resend_verification():
+    init_db()
+    email = request.form.get("email", "").strip().lower()
+    user = get_user_by_email(email) if email else None
+    if user and user["email"] and not user["email_verified"]:
+        token = _auth_token(user["id"], "email_verification", timedelta(hours=24))
+        _send_auth_link(email, "Verify your CertAuth account", "verify_email", token=token)
+    # Same answer for known and unknown addresses: no account enumeration.
+    return jsonify({"message": "If the account needs verification, an email has been sent."}), 202
+
+
+@app.route("/2fa/setup", methods=["POST"])
+@limiter.limit("5 per minute", methods=["POST"])
+def two_factor_setup():
+    # Requires a fully authenticated session ("user_id" is only set after a
+    # successful login/first-factor check) plus a fresh password re-entry.
+    user_id = session.get("user_id")
+    if not user_id:
+        return jsonify({"error": "Authentication required"}), 401
+    init_db()
+    user = get_user_by_id(user_id)
+    password = request.form.get("password", "")
+    if not user or not check_password_hash(user["password_hash"], password):
+        return jsonify({"error": "Recent password re-authentication required"}), 401
+    if user["totp_enabled"]:
+        current_code = (request.form.get("current_code") or "").strip()
+        if not user["totp_secret"] or not pyotp.TOTP(user["totp_secret"]).verify(current_code, valid_window=1):
+            return jsonify({"error": "Current authenticator code required"}), 401
+    secret = pyotp.random_base32()
+    recovery_codes = [secrets.token_hex(16) for _ in range(8)]
+    # The generated secret is not activated by this call: 2FA only turns on
+    # once /2fa/enable proves possession of it with a valid code. Recovery codes
+    # are kept as SHA-256 hashes here and in the users table; the plaintext
+    # values are shown to the user exactly once.
+    session["pending_totp_secret"] = secret
+    session["totp_setup_auth_at"] = datetime.now(timezone.utc).isoformat()
+    session["pending_recovery_codes"] = [
+        hashlib.sha256(code.encode()).hexdigest() for code in recovery_codes
+    ]
+    return jsonify({"secret": secret, "recovery_codes": recovery_codes})
+
+
+@app.route("/2fa/enable", methods=["POST"])
+@limiter.limit("5 per minute", methods=["POST"])
+def two_factor_enable():
+    user_id = session.get("user_id")
+    secret = session.get("pending_totp_secret")
+    if (
+        not user_id
+        or not secret
+        or not _timestamp_is_recent(session.get("totp_setup_auth_at"), TOTP_SETUP_MAX_AGE)
+        or not pyotp.TOTP(secret).verify((request.form.get("code") or "").strip(), valid_window=1)
+    ):
+        # Enabling requires a code generated from the pending secret, so a
+        # hijacked or half-authenticated setup state cannot activate 2FA alone.
+        return jsonify({"error": "Invalid authentication code"}), 400
+    session["auth_version"] = update_user_totp(
+        user_id, secret, session.pop("pending_recovery_codes", None) or []
+    )
+    session.pop("pending_totp_secret", None)
+    session.pop("totp_setup_auth_at", None)
+    return jsonify({"status": "enabled"})
+
+
+@app.route("/2fa/verify", methods=["GET", "POST"])
+@limiter.limit("5 per minute", methods=["POST"])
+@limiter.limit("5 per minute", methods=["POST"], key_func=_pending_two_factor_key)
+def two_factor_verify():
+    user_id = session.get("pending_2fa_user_id")
+    if not user_id:
+        return jsonify({"error": "Authentication required"}), 401
+    init_db()
+    user = get_user_by_id(user_id)
+    if not user or not user["totp_enabled"] or not user["totp_secret"]:
+        # The account is no longer waiting for a second factor.
+        _clear_auth_session()
+        return jsonify({"error": "Authentication required"}), 401
+    if request.method == "POST":
+        code = (request.form.get("code") or "").strip()
+        valid = bool(code) and pyotp.TOTP(user["totp_secret"]).verify(code, valid_window=1)
+        if not valid and code:
+            # Recovery codes are consumed atomically, so the same code can
+            # never complete two logins.
+            valid = consume_recovery_code(user_id, hashlib.sha256(code.encode()).hexdigest())
+        if not valid:
+            if _prefers_html():
+                return render_template("two_factor.html", error="Invalid authentication code."), 401
+            return jsonify({"error": "Invalid authentication code"}), 401
+        next_url = _safe_next_url(session.pop("pending_next_url", None))
+        # Promote the half-authenticated session to a full one.
+        _clear_auth_session()
+        session["user_id"] = user_id
+        session["auth_version"] = user["auth_version"]
+        session.permanent = True
+        return redirect(next_url or url_for("home"))
+    if _prefers_html():
+        return render_template("two_factor.html")
+    return jsonify({"message": "Authentication code required"})
+
+
+@app.route("/forgot-password", methods=["POST"])
+@limiter.limit("3 per hour", methods=["POST"])
+def forgot_password():
+    init_db()
+    email = request.form.get("email", "").strip().lower()
+    user = get_user_by_email(email) if email else None
+    if user:
+        token = _auth_token(user["id"], "password_reset", timedelta(hours=1))
+        _send_auth_link(email, "Reset your CertAuth password", "reset_password", token=token)
+    # Same answer for known and unknown addresses: no account enumeration.
+    return jsonify({"message": "If the account exists, a password-reset email has been sent."}), 202
+
+
+@app.route("/reset-password/<token>", methods=["GET", "POST"])
+@limiter.limit("5 per minute", methods=["POST"])
+def reset_password(token):
+    if request.method == "GET":
+        # The emailed link lands here; the token is only spent by the POST that
+        # actually changes the password, so a reload cannot burn it.
+        return render_template("reset_password.html", token=token)
+    password = request.form.get("password", "")
+    if not _password_is_acceptable(password):
+        # Validated before the token is spent, so a too-short password cannot
+        # invalidate the user's one remaining reset link.
+        return jsonify({"error": "Password must be at least 8 characters"}), 400
+    user_id = consume_auth_token(token, "password_reset")
+    if user_id is None:
+        return jsonify({"error": "Invalid or expired reset link"}), 400
+    # set_user_password() bumps auth_version, which invalidates every existing
+    # session for this account on its next request (2FA state is untouched).
+    set_user_password(user_id, generate_password_hash(password))
+    if user_id in (session.get("user_id"), session.get("pending_2fa_user_id")):
+        _clear_auth_session()
+    if _prefers_html():
+        flash("Your password has been reset. Please sign in.", "success")
+        return redirect(url_for("login"))
+    return jsonify({"message": "Password reset"}), 200
+# ----------------------------------
 # ----------------------------------
 # FILE VALIDATION
 # ----------------------------------
@@ -1204,6 +1675,13 @@ def home():
     return render_template("index.html")
 @app.route("/issue", methods=["GET", "POST"])
 def issue():
+    user = _authenticated_issuer()
+    if user is None:
+        if session.get("user_id") is not None:
+            return _render_error_page(
+                "errors/403.html", 403, "An active VERIFIER or ADMIN account is required."
+            )
+        return redirect(url_for("login", next=_safe_next_url(request.path)))
     if request.method == "POST":
         file = request.files.get("certificate")
         if not file or not allowed_file(file.filename):
@@ -1519,6 +1997,8 @@ def _details_to_api(details, cert_hash):
 @app.route("/api/issue", methods=["POST"])
 @csrf.exempt
 def api_issue():
+    if not _is_valid_admin_key(_admin_key_from_request()):
+        return jsonify({"error": "Admin authentication required"}), 403
     file = request.files.get("certificate")
     if not file or not allowed_file(file.filename):
         return jsonify({"error": "Invalid file type"}), 400

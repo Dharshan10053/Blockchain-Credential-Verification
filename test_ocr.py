@@ -12,7 +12,7 @@ sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 
 from models.ocr import extract_text, extract_details
 from utils.cert_hash import generate_cert_hash
-from blockchain import Blockchain
+from backend.utils.blockchain import Blockchain
 
 def main():
     image_path = "test_images/sample.png"
@@ -45,9 +45,9 @@ def main():
     chain = Blockchain()
     print("\n------ CHAIN LENGTH ------")
     print(len(chain.chain))
-    if chain.validate_chain():
+    if chain.is_valid():
         print("Chain is valid.")
-    found = chain.find_block_by_cert_hash(cert_hash)
+    found = chain.find_by_hash(cert_hash)
     print("Hash found on chain:", found is not None)
 
 

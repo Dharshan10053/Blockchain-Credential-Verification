@@ -2,7 +2,17 @@ import io
 import re
 
 import app as app_module
+from backend.utils.blockchain import Blockchain
 from app import app
+
+
+def _set_chain_path(monkeypatch, path):
+    monkeypatch.setitem(app.config, "BLOCKCHAIN_PATH", str(path))
+
+
+def _chain_hashes(path):
+    chain = Blockchain(path)
+    return [block["data"]["hash"] for block in chain.chain[1:]]
 
 
 def _post_issue(client, details, cert_hash):
@@ -24,7 +34,7 @@ def _post_issue(client, details, cert_hash):
 def test_api_issue_accepts_new_certificate_and_rejects_duplicate_without_api_key(
     monkeypatch, tmp_path
 ):
-    store_path = tmp_path / "blockchain.txt"
+    store_path = tmp_path / "blockchain.json"
     cert_hash = "a" * 64
     details = {
         "name": "Fresh Tester",
@@ -34,7 +44,7 @@ def test_api_issue_accepts_new_certificate_and_rejects_duplicate_without_api_key
         "university": "CertAuth",
     }
 
-    monkeypatch.setattr(app_module, "BLOCKCHAIN_FILE", str(store_path))
+    _set_chain_path(monkeypatch, store_path)
     monkeypatch.setattr(app_module, "_process_upload", lambda file: (details, cert_hash))
 
     with app.test_client() as client:
@@ -53,13 +63,13 @@ def test_api_issue_accepts_new_certificate_and_rejects_duplicate_without_api_key
     assert first.get_json()["status"] == "ISSUED SUCCESSFULLY"
     assert second.status_code == 200
     assert second.get_json()["status"] == "ALREADY EXISTS"
-    assert store_path.read_text().splitlines() == [cert_hash]
+    assert _chain_hashes(store_path) == [cert_hash]
 
 
 def test_browser_issue_flow_persists_duplicate_detection_across_restart(
     monkeypatch, tmp_path
 ):
-    store_path = tmp_path / "blockchain.txt"
+    store_path = tmp_path / "blockchain.json"
     details = {
         "name": "Browser Tester",
         "course": "Browser Testing",
@@ -71,7 +81,7 @@ def test_browser_issue_flow_persists_duplicate_detection_across_restart(
     second_hash = "c" * 64
     current = {"hash": first_hash}
 
-    monkeypatch.setattr(app_module, "BLOCKCHAIN_FILE", str(store_path))
+    _set_chain_path(monkeypatch, store_path)
     monkeypatch.setattr(
         app_module,
         "perform_ocr",
@@ -106,7 +116,7 @@ def test_browser_issue_flow_persists_duplicate_detection_across_restart(
     assert b"Already Issued" in persisted_duplicate.data
     assert different.status_code == 200
     assert b"Already Issued" not in different.data
-    assert store_path.read_text().splitlines() == [first_hash, second_hash]
+    assert _chain_hashes(store_path) == [first_hash, second_hash]
 
 
 def test_issue_form_has_no_api_key_field():

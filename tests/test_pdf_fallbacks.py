@@ -7,9 +7,13 @@ sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), '..')
 os.environ["FLASK_ENV"] = "development"
 
 from app import app
+from backend.database import db as db_module
 from backend.database.db import init_db, upsert_certificate
 
-def test_fallbacks():
+
+def test_fallbacks(tmp_path, monkeypatch):
+    monkeypatch.setitem(app.config, "BLOCKCHAIN_PATH", str(tmp_path / "blockchain.json"))
+    monkeypatch.setattr(db_module, "_DB_PATH", str(tmp_path / "certificates.db"))
     init_db()
     
     # Test Case 1: Standard AI-Extracted Certificate

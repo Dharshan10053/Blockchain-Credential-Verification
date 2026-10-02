@@ -4,9 +4,11 @@ Tests: headers, auth, input validation, error handlers, rate limiting.
 """
 import os
 import sys
+import tempfile
 
 # conftest.py handles env var setup before this runs
 from app import app
+from backend.database import db as db_module
 from backend.database.db import init_db, upsert_certificate
 
 
@@ -101,7 +103,11 @@ class TestAdminAccess:
         r = self.client.get("/ledger?admin_key=test-admin-key-12345")
         assert r.status_code == 403
 
-    def test_ledger_with_correct_header(self):
+    def test_ledger_with_correct_header(self, tmp_path, monkeypatch):
+        monkeypatch.setitem(
+            app.config, "BLOCKCHAIN_PATH", str(tmp_path / "blockchain.json")
+        )
+        monkeypatch.setattr(db_module, "_DB_PATH", str(tmp_path / "certificates.db"))
         r = self.client.get("/ledger", headers={"X-Admin-Key": "test-admin-key-12345"})
         # In production mode with SERVICES_OK potentially False — just check it doesn't return 403
         assert r.status_code != 403
@@ -115,8 +121,22 @@ class TestReportAccess:
     """Verify token-gated report download endpoint."""
 
     def setup_method(self):
+        self._temporary_storage = tempfile.TemporaryDirectory()
+        self._original_db_path = db_module._DB_PATH
+        self._original_chain_path = app.config["BLOCKCHAIN_PATH"]
+        db_module._DB_PATH = os.path.join(
+            self._temporary_storage.name, "certificates.db"
+        )
+        app.config["BLOCKCHAIN_PATH"] = os.path.join(
+            self._temporary_storage.name, "blockchain.json"
+        )
         init_db()
         self.client = app.test_client()
+
+    def teardown_method(self):
+        db_module._DB_PATH = self._original_db_path
+        app.config["BLOCKCHAIN_PATH"] = self._original_chain_path
+        self._temporary_storage.cleanup()
 
     def test_no_token_returns_403(self):
         mock_hash = "a" * 64  # Valid SHA-256 format

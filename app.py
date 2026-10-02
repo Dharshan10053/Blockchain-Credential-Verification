@@ -32,7 +32,7 @@ from backend.database.db import (
     log_verification,
     upsert_certificate,
 )
-from backend.utils.blockchain import Blockchain
+from backend.utils.blockchain import Blockchain, migrate_legacy_text_ledger
 from backend.utils.extraction_quality import (
     UNREADABLE_CERTIFICATE_MESSAGE,
     assess_extraction,
@@ -118,7 +118,14 @@ def _admin_key_error_message() -> str:
 # UPLOAD LIMITS
 # ----------------------------------
 UPLOAD_FOLDER = "uploads"
-BLOCKCHAIN_FILE = os.path.join(os.path.dirname(os.path.abspath(__file__)), "blockchain.txt")
+CANONICAL_BLOCKCHAIN_FILE = os.path.join(
+    os.path.dirname(os.path.abspath(__file__)), "blockchain.json"
+)
+LEGACY_BLOCKCHAIN_FILE = os.path.join(
+    os.path.dirname(os.path.abspath(__file__)), "blockchain.txt"
+)
+app.config["BLOCKCHAIN_PATH"] = CANONICAL_BLOCKCHAIN_FILE
+app.config["LEGACY_BLOCKCHAIN_PATH"] = LEGACY_BLOCKCHAIN_FILE
 os.makedirs(UPLOAD_FOLDER, exist_ok=True)
 ALLOWED_EXTENSIONS = {"pdf", "png", "jpg", "jpeg"}
 # Reject request bodies over 16 MB before they ever hit disk (DoS mitigation).
@@ -1155,21 +1162,40 @@ def generate_hash(details):
     cert_hash = hashlib.sha256(data_string.encode()).hexdigest()
     logger.info("Generated Hash: %s", cert_hash)
     return cert_hash
+def _canonical_blockchain():
+    """Return the structured ledger, importing the legacy archive once on the default path."""
+    chain_path = os.path.abspath(app.config["BLOCKCHAIN_PATH"])
+    if chain_path == os.path.abspath(CANONICAL_BLOCKCHAIN_FILE):
+        migrate_legacy_text_ledger(
+            chain_path,
+            app.config["LEGACY_BLOCKCHAIN_PATH"],
+        )
+    return Blockchain(chain_path)
+
+
 def load_hashes():
-    if not os.path.exists(BLOCKCHAIN_FILE):
-        return set()
-    with open(BLOCKCHAIN_FILE, "r") as f:
-        return set(f.read().splitlines())
-def add_certificate(cert_hash):
-    hashes = load_hashes()
-    if cert_hash in hashes:
-        return "ALREADY EXISTS"
-    with open(BLOCKCHAIN_FILE, "a") as f:
-        f.write(cert_hash + "\n")
-    return "ISSUED SUCCESSFULLY"
+    return _canonical_blockchain().find_all_hashes()
+
+
+def add_certificate(cert_hash, details=None):
+    metadata = {
+        field: (details or {}).get(field)
+        for field in ("name", "course", "university", "date", "cert_id")
+        if (details or {}).get(field) is not None
+    }
+    return (
+        "ISSUED SUCCESSFULLY"
+        if _canonical_blockchain().add_certificate_if_absent(cert_hash, metadata)
+        else "ALREADY EXISTS"
+    )
+
+
 def verify_certificate(cert_hash):
-    hashes = load_hashes()
-    return "VERIFIED" if cert_hash in hashes else "FAKE"
+    return (
+        "VERIFIED"
+        if _canonical_blockchain().find_by_hash(cert_hash)
+        else "FAKE"
+    )
 # ----------------------------------
 # ROUTES
 # ----------------------------------
@@ -1190,7 +1216,7 @@ def issue():
         except UnreadableCertificateError as e:
             return render_template("issue.html", error=str(e)), 400
         cert_hash = generate_hash(details)
-        status = add_certificate(cert_hash)
+        status = add_certificate(cert_hash, details)
         init_db()
         upsert_certificate(
             cert_hash,
@@ -1337,10 +1363,31 @@ def ledger():
     if not _admin_required():
         return _render_error_page("errors/403.html", 403, "Admin authentication required.")
     init_db()
-    chain = Blockchain()
+    chain = _canonical_blockchain()
+    metadata_by_hash = {
+        record.get("cert_hash"): record
+        for record in get_all_certificates()
+        if record.get("cert_hash")
+    }
+    records = []
+    for block in chain.chain[1:]:
+        data = block["data"]
+        cert_hash = data["hash"]
+        record = dict(metadata_by_hash.get(cert_hash, {}))
+        record.setdefault("name", data.get("name", ""))
+        record.setdefault("course", data.get("course", ""))
+        record.setdefault("organization", data.get("university", ""))
+        record.setdefault("date", data.get("date", ""))
+        record.setdefault(
+            "action",
+            "LEGACY" if data.get("legacy") else "ISSUE",
+        )
+        record["cert_hash"] = cert_hash
+        record["blockchain_status"] = "VERIFIED"
+        records.append(record)
     return render_template(
         "ledger.html",
-        records=get_all_certificates(),
+        records=records,
         chain_valid=chain.is_valid(),
     )
 
@@ -1349,7 +1396,7 @@ def ledger():
 def api_blockchain():
     if not _admin_required():
         return jsonify({"error": "Forbidden"}), 403
-    chain = Blockchain()
+    chain = _canonical_blockchain()
     return jsonify({"chain": chain.chain, "valid": chain.is_valid()})
 
 
@@ -1380,30 +1427,36 @@ def download_report(cert_hash):
 
     try:
         verification_timestamp = datetime.now(timezone.utc).isoformat()
-        blockchain_verified = verify_certificate(cert_hash) == "VERIFIED"
+        blockchain_verified = (
+            _canonical_blockchain().find_by_hash(cert_hash) is not None
+        )
         log_verification(
             "REPORT_DOWNLOAD",
             cert_hash,
-            "VALID",
+            "VALID" if blockchain_verified else "NOT_IN_LEDGER",
             request.remote_addr or "",
             request.user_agent.string,
-            "Certificate report generated from verified blockchain record.",
+            (
+                "Certificate report generated from a canonical blockchain record."
+                if blockchain_verified
+                else "Certificate metadata exists without canonical blockchain membership."
+            ),
         )
         report_path = generate_report(
             {
                 **record,
                 "hash": cert_hash,
-                "status": "VALID",
-                "label": "VERIFIED",
+                "status": "VALID" if blockchain_verified else "FAKE",
+                "label": "VERIFIED" if blockchain_verified else "NOT VERIFIED",
                 "explanation": (
-                    "Certificate hash matched the blockchain ledger."
+                    "Certificate hash matched the canonical blockchain ledger."
                     if blockchain_verified
-                    else "Certificate metadata was found in the certificate registry."
+                    else "Certificate metadata exists, but the hash is not in the canonical blockchain ledger."
                 ),
                 "blockchain_status": (
-                    "VERIFIED - hash found on the ledger"
+                    "VERIFIED - hash found on the canonical ledger"
                     if blockchain_verified
-                    else "RECORDED - certificate metadata found"
+                    else "NOT VERIFIED - hash not found on the canonical ledger"
                 ),
                 "verification_timestamp": verification_timestamp,
             },
@@ -1471,7 +1524,7 @@ def api_issue():
         return jsonify({"error": "Invalid file type"}), 400
     try:
         details, cert_hash = _process_upload(file)
-        status = add_certificate(cert_hash)
+        status = add_certificate(cert_hash, details)
         resp = _details_to_api(details, cert_hash)
         resp["status"] = status
         return jsonify(resp)

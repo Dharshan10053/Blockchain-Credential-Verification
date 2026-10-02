@@ -6,6 +6,7 @@ import fitz
 import app as app_module
 from app import app
 from backend.database import db
+from backend.utils.blockchain import Blockchain
 
 
 def _post_issue(client):
@@ -41,7 +42,7 @@ def _post_verify(client):
 
 
 def test_browser_issue_verify_report_contains_certificate_metadata(monkeypatch, tmp_path):
-    store_path = tmp_path / "blockchain.txt"
+    store_path = tmp_path / "blockchain.json"
     database_path = tmp_path / "certificates.db"
     details = {
         "name": "Report Holder",
@@ -52,7 +53,7 @@ def test_browser_issue_verify_report_contains_certificate_metadata(monkeypatch, 
     }
     cert_hash = "d" * 64
 
-    monkeypatch.setattr(app_module, "BLOCKCHAIN_FILE", str(store_path))
+    monkeypatch.setitem(app_module.app.config, "BLOCKCHAIN_PATH", str(store_path))
     monkeypatch.setattr(db, "_DB_PATH", str(database_path))
     monkeypatch.setattr(app_module, "perform_ocr", lambda filepath: "report fixture")
     monkeypatch.setattr(app_module, "extract_details", lambda text: details)
@@ -61,6 +62,7 @@ def test_browser_issue_verify_report_contains_certificate_metadata(monkeypatch, 
         issue_response = _post_issue(client)
         assert issue_response.status_code == 200
         assert b"Certificate Issued" in issue_response.data
+        assert Blockchain(store_path).find_by_hash(cert_hash)
 
         verify_response = _post_verify(client)
         assert verify_response.status_code == 200
@@ -83,6 +85,7 @@ def test_browser_issue_verify_report_contains_certificate_metadata(monkeypatch, 
         details["cert_id"],
         details["university"],
         "Blockchain Status",
+        "VERIFIED - hash found on the canonical ledger",
         cert_hash,
         "Verification Timestamp",
     ):

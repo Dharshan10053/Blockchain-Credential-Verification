@@ -4,9 +4,9 @@ Flask app that verifies certificate authenticity using a **blockchain-backed led
 
 ## Features
 
-- **Persistent blockchain**: Chain saved to `blockchain.json`, loaded on startup. Migrates from legacy `issue_certificate.json` if present.
+- **Persistent blockchain**: `blockchain.json` is the canonical certificate-membership ledger. On first use it imports `blockchain.txt` hashes once, backs up the existing JSON chain before migration, and leaves the text file read-only. SQLite stores certificate metadata and audit history, not certificate membership.
 - **Pattern-based extraction**: Certificate fields (name, course, date, ID) are extracted from OCR text using configurable patterns—no hardcoded certificate wording.
-- **Canonical hashing**: Normalized field values so minor OCR differences still produce the same hash for verification.
+- **Canonical hashing**: Certificate identity remains SHA-256 of `name|course|university|date|cert_id`; block-integrity hashes are separate.
 - **Chain validation**: Block hashes and `previous_hash` links are validated on load.
 
 ## Setup

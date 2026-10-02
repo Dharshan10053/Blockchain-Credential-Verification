@@ -21,6 +21,7 @@ import pytest
 
 import app as app_module
 from backend.database import db as db_module
+from backend.utils.blockchain import Blockchain
 from backend.utils.extraction_quality import (
     UNREADABLE_CERTIFICATE_MESSAGE,
     assess_extraction,
@@ -58,7 +59,7 @@ def client(tmp_path, monkeypatch):
     app_module.app.config["TESTING"] = True
     app_module.app.config["WTF_CSRF_ENABLED"] = False
     monkeypatch.setattr(
-        app_module, "BLOCKCHAIN_FILE", str(tmp_path / "blockchain.txt")
+        app_module.app.config, "BLOCKCHAIN_PATH", str(tmp_path / "blockchain.json")
     )
     monkeypatch.setattr(
         app_module, "UPLOAD_FOLDER", str(tmp_path / "uploads"), raising=False
@@ -84,10 +85,11 @@ def _upload(client, url, text, monkeypatch, filename="certificate.png"):
 
 
 def _stored_hashes(client):
-    if not os.path.exists(app_module.BLOCKCHAIN_FILE):
+    path = app_module.app.config["BLOCKCHAIN_PATH"]
+    if not os.path.exists(path):
         return []
-    with open(app_module.BLOCKCHAIN_FILE) as handle:
-        return [line for line in handle.read().splitlines() if line.strip()]
+    chain = Blockchain(path)
+    return [block["data"]["hash"] for block in chain.chain[1:]]
 
 
 # ---------------------------------------------------------------------------

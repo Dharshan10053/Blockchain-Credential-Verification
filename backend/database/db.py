@@ -9,16 +9,23 @@ import uuid
 import hashlib
 import json
 from datetime import datetime, timezone
+from contextlib import contextmanager
+from typing import Iterator
 
 logger = logging.getLogger(__name__)
 
 _DB_PATH = os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "..", "certificates.db")
 
 
-def _connect() -> sqlite3.Connection:
+@contextmanager
+def _connect() -> Iterator[sqlite3.Connection]:
     conn = sqlite3.connect(_DB_PATH)
     conn.row_factory = sqlite3.Row
-    return conn
+    try:
+        with conn:
+            yield conn
+    finally:
+        conn.close()
 
 
 def init_db():

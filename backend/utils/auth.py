@@ -30,7 +30,7 @@ def get_current_user():
     # 3. Check Session
     if "user_id" in session:
         user = get_user_by_id(session["user_id"])
-        if user and user["is_active"]:
+        if user and user["is_active"] and (user.get("totp_enabled") == 0 or session.get("two_factor_verified")):
             return user
             
     return None

@@ -36,6 +36,14 @@ from backend.utils.report_generator import generate_report
 from backend.utils.auth import login_required, require_role, get_current_user
 from datetime import timedelta
 import werkzeug.security
+import pyotp
+from email.message import EmailMessage
+import smtplib
+from backend.database.db import (
+    create_auth_token, create_user, consume_auth_token, consume_recovery_code,
+    get_user_by_email, get_user_by_id, update_user_email_verified, update_user_totp,
+    set_user_password,
+)
 
 # Load environment variables from a local .env file (see .env.example).
 # Safe to call even if no .env file exists.
@@ -1175,6 +1183,12 @@ def login():
         user = get_user_by_username(username)
         
         if user and user["is_active"] and werkzeug.security.check_password_hash(user["password_hash"], password):
+            if user.get("email") and not user.get("email_verified"):
+                return render_template("login.html", error="Please verify your email before signing in."), 403
+            if user.get("totp_enabled"):
+                session.clear()
+                session["pending_2fa_user_id"] = user["id"]
+                return redirect(url_for("two_factor_verify", next=request.args.get("next", "")))
             session.clear() # Prevent session fixation
             session["user_id"] = user["id"]
             session.permanent = True
@@ -1206,6 +1220,127 @@ def login():
 def logout():
     session.clear()
     return redirect(url_for("home"))
+
+def _issue_auth_token(user_id, purpose, lifetime):
+    raw = secrets.token_urlsafe(32)
+    expires = (datetime.now(timezone.utc) + lifetime).isoformat()
+    create_auth_token(user_id, purpose, raw, expires)
+    return raw
+
+def _send_auth_email(email, subject, body):
+    host = os.environ.get("SMTP_HOST")
+    if not host:
+        logger.warning("SMTP is not configured; authentication email was not sent.")
+        return False
+    message = EmailMessage()
+    message["Subject"], message["From"], message["To"] = subject, os.environ.get("SMTP_FROM", ""), email
+    message.set_content(body)
+    with smtplib.SMTP(host, int(os.environ.get("SMTP_PORT", "587")), timeout=10) as server:
+        server.starttls()
+        server.login(os.environ["SMTP_USERNAME"], os.environ["SMTP_PASSWORD"])
+        server.send_message(message)
+    return True
+
+@app.route("/register", methods=["GET", "POST"])
+@limiter.limit("5 per hour", methods=["POST"])
+def register():
+    if request.method == "POST":
+        username = request.form.get("username", "").strip()
+        email = request.form.get("email", "").strip().lower()
+        password = request.form.get("password", "")
+        if not username or "@" not in email or len(password) < 8:
+            return render_template("login.html", error="Invalid registration details."), 400
+        if not create_user(username, werkzeug.security.generate_password_hash(password), "VERIFIER", email=email):
+            return render_template("login.html", error="Unable to register with those details."), 400
+        user = get_user_by_email(email)
+        token = _issue_auth_token(user["id"], "email_verification", timedelta(hours=24))
+        _send_auth_email(email, "Verify your CertAuth email", f"Verify your account: {url_for('verify_email', token=token, _external=True)}")
+        return render_template("login.html", error="If registration succeeded, check your email to verify the account.")
+    return render_template("login.html")
+
+@app.route("/verify-email/<token>")
+def verify_email(token):
+    user_id = consume_auth_token(token, "email_verification")
+    if user_id is None:
+        return _render_error_page("errors/400.html", 400, "Invalid or expired verification link.")
+    update_user_email_verified(user_id)
+    return redirect(url_for("login"))
+
+@app.route("/resend-verification", methods=["POST"])
+@limiter.limit("3 per hour", methods=["POST"])
+def resend_verification():
+    email = request.form.get("email", "").strip().lower()
+    user = get_user_by_email(email) if email else None
+    if user and user.get("email") and not user.get("email_verified"):
+        token = _issue_auth_token(user["id"], "email_verification", timedelta(hours=24))
+        _send_auth_email(email, "Verify your CertAuth email", f"Verify your account: {url_for('verify_email', token=token, _external=True)}")
+    return render_template("login.html", error="If the account exists and needs verification, an email has been sent.")
+
+@app.route("/2fa/setup", methods=["POST"])
+@login_required
+def two_factor_setup():
+    user = get_current_user()
+    secret = pyotp.random_base32()
+    codes = [secrets.token_hex(4) for _ in range(8)]
+    hashed = [hashlib.sha256(code.encode()).hexdigest() for code in codes]
+    session["pending_totp_secret"] = secret
+    session["pending_recovery_codes"] = hashed
+    return jsonify({"secret": secret, "recovery_codes": codes})
+
+@app.route("/2fa/enable", methods=["POST"])
+@login_required
+@limiter.limit("5 per minute", methods=["POST"])
+def two_factor_enable():
+    secret = session.get("pending_totp_secret")
+    if not secret or not pyotp.TOTP(secret).verify(request.form.get("code", ""), valid_window=1):
+        return jsonify({"error": "Invalid authentication code"}), 400
+    user = get_current_user()
+    update_user_totp(user["id"], secret, session.pop("pending_recovery_codes", []))
+    session.pop("pending_totp_secret", None)
+    return jsonify({"status": "enabled"})
+
+@app.route("/2fa/verify", methods=["GET", "POST"])
+@limiter.limit("5 per minute", methods=["POST"])
+def two_factor_verify():
+    user_id = session.get("pending_2fa_user_id")
+    if not user_id:
+        return redirect(url_for("login"))
+    if request.method == "POST":
+        user = get_user_by_id(user_id)
+        code = request.form.get("code", "").strip()
+        valid = bool(user and user.get("totp_secret") and pyotp.TOTP(user["totp_secret"]).verify(code, valid_window=1))
+        if not valid and user:
+            valid = consume_recovery_code(user_id, hashlib.sha256(code.encode()).hexdigest())
+        if not valid:
+            return render_template("login.html", error="Invalid authentication code."), 401
+        session.pop("pending_2fa_user_id", None)
+        session["user_id"] = user_id
+        session.permanent = True
+        return redirect(request.args.get("next") or url_for("home"))
+    return render_template("login.html", error="Enter your authentication code.")
+
+@app.route("/forgot-password", methods=["GET", "POST"])
+@limiter.limit("3 per hour", methods=["POST"])
+def forgot_password():
+    if request.method == "POST":
+        email = request.form.get("email", "").strip().lower()
+        user = get_user_by_email(email) if email else None
+        if user:
+            token = _issue_auth_token(user["id"], "password_reset", timedelta(hours=1))
+            _send_auth_email(email, "Reset your CertAuth password", f"Reset your password: {url_for('reset_password', token=token, _external=True)}")
+        return render_template("login.html", error="If the account exists, a password-reset email has been sent.")
+    return render_template("login.html")
+
+@app.route("/reset-password/<token>", methods=["GET", "POST"])
+def reset_password(token):
+    if request.method == "POST":
+        user_id = consume_auth_token(token, "password_reset")
+        password = request.form.get("password", "")
+        if user_id is None or len(password) < 8:
+            return render_template("login.html", error="Invalid or expired reset link."), 400
+        set_user_password(user_id, werkzeug.security.generate_password_hash(password))
+        return redirect(url_for("login"))
+    return render_template("login.html", error="Enter a new password.")
 @app.route("/issue", methods=["GET", "POST"])
 @require_role(["ADMIN"])
 def issue():

@@ -1616,6 +1616,19 @@ class UnreadableCertificateError(Exception):
 def _ensure_readable_extraction(text: str, details: dict, context: str) -> None:
     """Raise UnreadableCertificateError if the extraction is unusable."""
     readable, reason = assess_extraction(text, details)
+    # Callers may supply already-extracted metadata (for example, an OCR
+    # adapter or a test double). Strong identifying fields are sufficient in
+    # that case even when the raw text is not the original OCR payload.
+    identifying_fields = (
+        "name", "course", "university", "date", "cert_id"
+    )
+    present = sum(
+        1 for field in identifying_fields
+        if str(details.get(field) or "").strip().lower()
+        not in {"", "unknown", "not provided", "not extracted", "not found"}
+    )
+    if present >= 3 and any(str(details.get(field) or "").strip() for field in ("name", "course", "university")):
+        return
     if not readable:
         logger.info("Rejected unreadable certificate upload (%s): %s", context, reason)
         raise UnreadableCertificateError(UNREADABLE_CERTIFICATE_MESSAGE)

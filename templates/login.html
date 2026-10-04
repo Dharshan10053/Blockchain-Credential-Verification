@@ -1,34 +1,320 @@
 {% extends "base.html" %}
 {% block title %}Login{% endblock %}
 
-{% block content %}
-<div class="container page-wrap">
-  <div class="form-card fade-up">
-    <h2>Secure Login</h2>
-    
-    {% if error %}
-      <div class="alert alert-error" style="color: #ff6b6b; background: rgba(255,107,107,0.1); padding: 1rem; border-radius: 8px; margin-bottom: 1rem;">
-        {{ error }}
-      </div>
-    {% endif %}
+{% block head_extra %}
+<style>
+  .login-shell {
+    min-height: calc(100vh - 190px);
+    display: grid;
+    place-items: center;
+    padding: 48px 24px 64px;
+    position: relative;
+    isolation: isolate;
+  }
 
-    <form method="POST" action="{{ url_for('login', next=request.args.get('next', '')) }}">
-      <input type="hidden" name="csrf_token" value="{{ csrf_token() }}"/>
-      
-      <div class="form-group" style="margin-bottom: 1.5rem;">
-        <label for="username" style="display: block; margin-bottom: 0.5rem; color: var(--text-mid);">Username</label>
-        <input type="text" id="username" name="username" class="form-control" required style="width: 100%; padding: 0.75rem; border-radius: 8px; border: 1px solid rgba(255,255,255,0.1); background: rgba(255,255,255,0.05); color: #fff;">
+  .login-shell::before {
+    content: "";
+    position: absolute;
+    z-index: -1;
+    width: min(760px, 90vw);
+    height: 460px;
+    left: 50%;
+    top: 50%;
+    transform: translate(-50%, -50%);
+    background: radial-gradient(ellipse, rgba(37, 99, 235, 0.16), transparent 68%);
+    pointer-events: none;
+  }
+
+  .login-panel {
+    width: min(100%, 960px);
+    display: grid;
+    grid-template-columns: 1.02fr 0.98fr;
+    overflow: hidden;
+    border: 1px solid rgba(148, 163, 184, 0.16);
+    border-radius: 24px;
+    background: rgba(10, 16, 30, 0.88);
+    box-shadow: 0 28px 80px rgba(0, 0, 0, 0.48), inset 0 1px 0 rgba(255, 255, 255, 0.05);
+    backdrop-filter: blur(22px);
+    -webkit-backdrop-filter: blur(22px);
+  }
+
+  .login-aside {
+    min-height: 540px;
+    padding: 48px;
+    display: flex;
+    flex-direction: column;
+    justify-content: space-between;
+    position: relative;
+    overflow: hidden;
+    border-right: 1px solid rgba(148, 163, 184, 0.12);
+    background:
+      radial-gradient(circle at 78% 20%, rgba(34, 211, 238, 0.14), transparent 34%),
+      linear-gradient(145deg, rgba(30, 64, 175, 0.22), rgba(15, 23, 42, 0.12) 60%);
+  }
+
+  .login-aside::after {
+    content: "";
+    position: absolute;
+    width: 280px;
+    height: 280px;
+    right: -130px;
+    bottom: -120px;
+    border: 1px solid rgba(56, 189, 248, 0.18);
+    border-radius: 50%;
+    box-shadow: 0 0 0 28px rgba(56, 189, 248, 0.025), 0 0 0 58px rgba(56, 189, 248, 0.02);
+    pointer-events: none;
+  }
+
+  .login-mark {
+    width: 46px;
+    height: 46px;
+    display: grid;
+    place-items: center;
+    color: #e0f2fe;
+    border: 1px solid rgba(125, 211, 252, 0.32);
+    border-radius: 14px;
+    background: linear-gradient(145deg, rgba(14, 165, 233, 0.22), rgba(37, 99, 235, 0.18));
+    box-shadow: 0 8px 24px rgba(2, 132, 199, 0.14), inset 0 1px 0 rgba(255, 255, 255, 0.12);
+  }
+
+  .login-aside-copy {
+    position: relative;
+    z-index: 1;
+    margin: auto 0;
+    padding: 52px 0;
+  }
+
+  .login-eyebrow {
+    display: inline-flex;
+    align-items: center;
+    gap: 8px;
+    margin-bottom: 20px;
+    color: #7dd3fc;
+    font-size: 11px;
+    font-weight: 700;
+    letter-spacing: 0.14em;
+    text-transform: uppercase;
+  }
+
+  .login-eyebrow::before {
+    content: "";
+    width: 7px;
+    height: 7px;
+    border-radius: 50%;
+    background: #22d3ee;
+    box-shadow: 0 0 12px rgba(34, 211, 238, 0.8);
+  }
+
+  .login-aside h1 {
+    max-width: 400px;
+    margin: 0 0 18px;
+    color: #f8fafc;
+    font-size: clamp(2rem, 4vw, 2.8rem);
+    font-weight: 600;
+    letter-spacing: -0.055em;
+    line-height: 1.08;
+  }
+
+  .login-aside-copy p {
+    max-width: 390px;
+    color: #a8b6ca;
+    font-size: 15px;
+    line-height: 1.75;
+  }
+
+  .login-assurance {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    color: #a8b6ca;
+    font-size: 12px;
+    position: relative;
+    z-index: 1;
+  }
+
+  .login-assurance svg { color: #67e8f9; flex: 0 0 auto; }
+
+  .login-form-side {
+    display: flex;
+    align-items: center;
+    padding: 48px;
+  }
+
+  .login-form-content { width: 100%; }
+
+  .login-form-kicker {
+    margin-bottom: 9px;
+    color: #7dd3fc;
+    font-size: 11px;
+    font-weight: 700;
+    letter-spacing: 0.13em;
+    text-transform: uppercase;
+  }
+
+  .login-form-content h2 {
+    margin: 0 0 8px;
+    color: #f8fafc;
+    font-size: 27px;
+    font-weight: 600;
+    letter-spacing: -0.04em;
+  }
+
+  .login-form-intro {
+    margin: 0 0 30px;
+    color: #94a3b8;
+    font-size: 14px;
+  }
+
+  .login-error {
+    margin-bottom: 22px;
+    padding: 12px 14px;
+    border: 1px solid rgba(248, 113, 113, 0.24);
+    border-radius: 10px;
+    background: rgba(127, 29, 29, 0.18);
+    color: #fecaca;
+    font-size: 13px;
+    line-height: 1.5;
+  }
+
+  .login-field { margin-bottom: 20px; }
+
+  .login-field label {
+    display: block;
+    margin-bottom: 8px;
+    color: #d7e0ee;
+    font-size: 13px;
+    font-weight: 500;
+  }
+
+  .login-field input {
+    width: 100%;
+    min-height: 48px;
+    padding: 12px 14px;
+    border: 1px solid rgba(148, 163, 184, 0.2);
+    border-radius: 10px;
+    outline: none;
+    background: rgba(2, 6, 23, 0.54);
+    color: #f8fafc;
+    font: inherit;
+    font-size: 14px;
+    transition: border-color 160ms ease, box-shadow 160ms ease, background 160ms ease;
+  }
+
+  .login-field input:hover { border-color: rgba(148, 163, 184, 0.36); }
+  .login-field input:focus {
+    border-color: rgba(56, 189, 248, 0.76);
+    background: rgba(2, 6, 23, 0.76);
+    box-shadow: 0 0 0 3px rgba(14, 165, 233, 0.14);
+  }
+
+  .login-submit {
+    width: 100%;
+    min-height: 48px;
+    margin-top: 7px;
+    justify-content: center;
+    border: 1px solid rgba(125, 211, 252, 0.3);
+    border-radius: 10px;
+    background: linear-gradient(105deg, #0891b2, #2563eb);
+    box-shadow: 0 10px 24px rgba(37, 99, 235, 0.22), inset 0 1px 0 rgba(255, 255, 255, 0.16);
+    color: white;
+    font-size: 14px;
+    font-weight: 600;
+  }
+
+  .login-submit:hover {
+    background: linear-gradient(105deg, #0e7490, #1d4ed8);
+    box-shadow: 0 12px 28px rgba(37, 99, 235, 0.3), inset 0 1px 0 rgba(255, 255, 255, 0.16);
+  }
+
+  .login-form-foot {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    gap: 8px;
+    margin-top: 24px;
+    color: #718096;
+    font-size: 11px;
+  }
+
+  .login-form-foot svg { color: #64748b; }
+
+  @media (max-width: 760px) {
+    .login-shell { min-height: auto; padding: 32px 18px 48px; }
+    .navbar .nav-links { display: none; }
+    .login-panel { max-width: 500px; grid-template-columns: 1fr; }
+    .login-aside { min-height: auto; padding: 28px 30px; border-right: 0; border-bottom: 1px solid rgba(148, 163, 184, 0.12); }
+    .login-aside-copy { padding: 30px 0 24px; }
+    .login-aside h1 { font-size: 2rem; }
+    .login-aside-copy p { font-size: 14px; }
+    .login-form-side { padding: 32px 30px; }
+  }
+
+  @media (max-width: 420px) {
+    .login-shell { padding-right: 12px; padding-left: 12px; }
+    .login-aside, .login-form-side { padding-right: 22px; padding-left: 22px; }
+  }
+</style>
+{% endblock %}
+
+{% block content %}
+<div class="login-shell">
+  <section class="login-panel fade-up" aria-labelledby="login-heading">
+    <div class="login-aside">
+      <div class="login-mark" aria-hidden="true">
+        <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6">
+          <path d="M12 3 20 7.5v9L12 21l-8-4.5v-9L12 3Z" stroke-linejoin="round"/>
+          <path d="m9 12 2 2 4-4" stroke-linecap="round" stroke-linejoin="round"/>
+        </svg>
       </div>
-      
-      <div class="form-group" style="margin-bottom: 2rem;">
-        <label for="password" style="display: block; margin-bottom: 0.5rem; color: var(--text-mid);">Password</label>
-        <input type="password" id="password" name="password" class="form-control" required style="width: 100%; padding: 0.75rem; border-radius: 8px; border: 1px solid rgba(255,255,255,0.1); background: rgba(255,255,255,0.05); color: #fff;">
+      <div class="login-aside-copy">
+        <div class="login-eyebrow">Protected workspace</div>
+        <h1>Trust begins with verified credentials.</h1>
+        <p>Sign in to securely manage certificate issuance and verification through the CertAuth platform.</p>
       </div>
-      
-      <button type="submit" class="btn btn-primary" style="width: 100%; justify-content: center;">
-        Login
-      </button>
-    </form>
-  </div>
+      <div class="login-assurance">
+        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" aria-hidden="true">
+          <path d="M12 3 20 7v5c0 4.7-3.2 7.7-8 9-4.8-1.3-8-4.3-8-9V7l8-4Z" stroke-linejoin="round"/>
+          <path d="m9 12 2 2 4-4" stroke-linecap="round" stroke-linejoin="round"/>
+        </svg>
+        Secured access · Blockchain-backed records
+      </div>
+    </div>
+
+    <div class="login-form-side">
+      <div class="login-form-content">
+        <div class="login-form-kicker">Account access</div>
+        <h2 id="login-heading">Welcome back</h2>
+        <p class="login-form-intro">Enter your credentials to continue.</p>
+
+        {% if error %}
+          <div class="login-error" role="alert">{{ error }}</div>
+        {% endif %}
+
+        <form method="POST" autocomplete="off" action="{{ url_for('login', next=request.args.get('next', '')) }}">
+          <input type="hidden" name="csrf_token" value="{{ csrf_token() }}"/>
+
+          <div class="login-field">
+            <label for="username">Username</label>
+            <input type="text" id="username" name="username" required autocomplete="off" autocapitalize="none" spellcheck="false">
+          </div>
+
+          <div class="login-field">
+            <label for="password">Password</label>
+            <input type="password" id="password" name="password" required autocomplete="current-password">
+          </div>
+
+          <button type="submit" class="btn btn-primary login-submit">Sign in securely</button>
+        </form>
+
+        <div class="login-form-foot">
+          <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" aria-hidden="true">
+            <rect x="4" y="10" width="16" height="11" rx="2"/>
+            <path d="M8 10V7a4 4 0 0 1 8 0v3"/>
+          </svg>
+          Your session is protected with secure authentication
+        </div>
+      </div>
+    </div>
+  </section>
 </div>
 {% endblock %}

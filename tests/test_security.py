@@ -131,6 +131,49 @@ class TestAdminAccess:
         assert r.status_code == 302
         assert "/login" in r.headers.get("Location", "")
 
+    def test_issue_requires_login_and_session_is_invalidated_after_restart(self, monkeypatch):
+        monkeypatch.setitem(self.client.application.config, "WTF_CSRF_ENABLED", False)
+        monkeypatch.setattr(limiter, "enabled", False)
+        init_db()
+
+        response = self.client.get("/issue")
+        assert response.status_code == 302
+        assert "/login" in response.headers.get("Location", "")
+
+        username = f"restart-session-{secrets.token_hex(8)}"
+        password = "test-session-password"
+        assert create_user(username, generate_password_hash(password), "ADMIN")
+        login = self.client.post(
+            "/login",
+            data={"username": username, "password": password},
+        )
+        assert login.status_code == 302
+        assert self.client.get("/issue").status_code == 200
+
+        # A new process starts with a new instance identifier; an old signed
+        # session cookie must no longer authorize protected pages.
+        monkeypatch.setitem(
+            self.client.application.config,
+            "AUTH_SESSION_INSTANCE",
+            secrets.token_urlsafe(32),
+        )
+        response = self.client.get("/issue")
+        assert response.status_code == 302
+        assert "/login" in response.headers.get("Location", "")
+
+        login = self.client.post(
+            "/login",
+            data={"username": username, "password": password},
+        )
+        assert login.status_code == 302
+        assert self.client.get("/issue").status_code == 200
+
+        logout = self.client.post("/logout")
+        assert logout.status_code == 302
+        response = self.client.get("/issue")
+        assert response.status_code == 302
+        assert "/login" in response.headers.get("Location", "")
+
     def test_ledger_with_query_param_still_redirects(self):
         """Admin key in URL query param must not work — headers only."""
         r = self.client.get("/ledger?admin_key=test-admin-key-12345")

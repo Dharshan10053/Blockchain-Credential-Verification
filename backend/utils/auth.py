@@ -1,5 +1,5 @@
 from functools import wraps
-from flask import session, request, jsonify, redirect, url_for
+from flask import current_app, session, request, jsonify, redirect, url_for
 import os
 from backend.database.db import get_user_by_username, get_user_by_api_key_hash, get_user_by_id
 import hashlib
@@ -29,6 +29,11 @@ def get_current_user():
         
     # 3. Check Session
     if "user_id" in session:
+        if session.get("auth_session_instance") != current_app.config.get(
+            "AUTH_SESSION_INSTANCE"
+        ):
+            session.clear()
+            return None
         user = get_user_by_id(session["user_id"])
         if user and user["is_active"] and (user.get("totp_enabled") == 0 or session.get("two_factor_verified")):
             return user

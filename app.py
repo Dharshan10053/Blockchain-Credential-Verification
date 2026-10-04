@@ -91,7 +91,8 @@ app.config.update(
     SESSION_COOKIE_SECURE=True,
     SESSION_COOKIE_HTTPONLY=True,
     SESSION_COOKIE_SAMESITE='Lax',
-    PERMANENT_SESSION_LIFETIME=timedelta(hours=24)
+    PERMANENT_SESSION_LIFETIME=timedelta(hours=24),
+    AUTH_SESSION_INSTANCE=secrets.token_urlsafe(32),
 )
 
 # ----------------------------------
@@ -1188,9 +1189,11 @@ def login():
             if user.get("totp_enabled"):
                 session.clear()
                 session["pending_2fa_user_id"] = user["id"]
+                session["auth_session_instance"] = app.config["AUTH_SESSION_INSTANCE"]
                 return redirect(url_for("two_factor_verify", next=request.args.get("next", "")))
             session.clear() # Prevent session fixation
             session["user_id"] = user["id"]
+            session["auth_session_instance"] = app.config["AUTH_SESSION_INSTANCE"]
             session.permanent = True
             update_last_login(user["id"])
             logger.info(f"User '{username}' logged in successfully.")
@@ -1303,7 +1306,11 @@ def two_factor_enable():
 @limiter.limit("5 per minute", methods=["POST"])
 def two_factor_verify():
     user_id = session.get("pending_2fa_user_id")
-    if not user_id:
+    if (
+        not user_id
+        or session.get("auth_session_instance") != app.config["AUTH_SESSION_INSTANCE"]
+    ):
+        session.clear()
         return redirect(url_for("login"))
     if request.method == "POST":
         user = get_user_by_id(user_id)
@@ -1315,6 +1322,7 @@ def two_factor_verify():
             return render_template("login.html", error="Invalid authentication code."), 401
         session.pop("pending_2fa_user_id", None)
         session["user_id"] = user_id
+        session["auth_session_instance"] = app.config["AUTH_SESSION_INSTANCE"]
         session.permanent = True
         return redirect(request.args.get("next") or url_for("home"))
     return render_template("login.html", error="Enter your authentication code.")

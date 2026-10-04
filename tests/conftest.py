@@ -6,6 +6,7 @@ import hashlib
 import os
 import secrets
 import sys
+import tempfile
 
 # Prepend project root to sys.path
 sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), "..")))
@@ -20,6 +21,11 @@ os.environ.setdefault("BASE_URL", "http://localhost:5000")
 
 import pytest
 from werkzeug.security import generate_password_hash
+
+from backend.database import db as database
+
+_TEST_DB_DIRECTORY = tempfile.TemporaryDirectory(prefix="certauth-tests-")
+database._DB_PATH = os.path.join(_TEST_DB_DIRECTORY.name, "certificates.db")
 
 from app import app as flask_app
 from backend.database.db import create_api_key, create_user, init_db
@@ -60,7 +66,11 @@ def admin_client():
         with flask_app.app_context():
             _create_admin_user()
         # Log in through the real login endpoint
-        client.post("/login", data={"username": "admin_test", "password": "password"})
+        client._admin_credentials = ("admin_test", "password")
+        client.post(
+            "/login?next=%2Fissue",
+            data={"username": "admin_test", "password": "password"},
+        )
         yield client
 
 

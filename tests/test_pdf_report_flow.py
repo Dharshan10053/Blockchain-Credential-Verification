@@ -68,7 +68,10 @@ def test_browser_issue_verify_report_contains_certificate_metadata(monkeypatch, 
         with app.app_context():
             db.init_db()
             db.create_user("report_admin", generate_password_hash("password"), "ADMIN")
-        client.post("/login", data={"username": "report_admin", "password": "password"})
+        client.post(
+            "/login?next=%2Fissue",
+            data={"username": "report_admin", "password": "password"},
+        )
 
         issue_response = _post_issue(client)
         assert issue_response.status_code == 200

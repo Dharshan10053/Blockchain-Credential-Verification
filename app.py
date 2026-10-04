@@ -1211,6 +1211,8 @@ def login():
                     or next_url.startswith("/\\")
                 ):
                     next_url = None
+            if next_url and urlsplit(next_url).path == url_for("issue"):
+                session["issue_entry_grant"] = True
             return redirect(next_url or url_for("home"))
             
         logger.warning(f"Failed login attempt for username: {username}")
@@ -1323,8 +1325,22 @@ def two_factor_verify():
         session.pop("pending_2fa_user_id", None)
         session["user_id"] = user_id
         session["auth_session_instance"] = app.config["AUTH_SESSION_INSTANCE"]
+        session["two_factor_verified"] = True
         session.permanent = True
-        return redirect(request.args.get("next") or url_for("home"))
+        next_url = request.args.get("next", "")
+        parsed_next = urlsplit(next_url)
+        if (
+            parsed_next.path == url_for("issue")
+            and (
+                (not parsed_next.scheme and not parsed_next.netloc)
+                or (
+                    parsed_next.scheme == request.scheme
+                    and parsed_next.netloc == request.host
+                )
+            )
+        ):
+            session["issue_entry_grant"] = True
+        return redirect(next_url or url_for("home"))
     return render_template("login.html", error="Enter your authentication code.")
 
 @app.route("/forgot-password", methods=["GET", "POST"])
@@ -1352,6 +1368,14 @@ def reset_password(token):
 @app.route("/issue", methods=["GET", "POST"])
 @require_role(["ADMIN"])
 def issue():
+    if request.method == "GET":
+        if not session.pop("issue_entry_grant", False):
+            session.pop("issue_form_authorized", None)
+            return redirect(url_for("login", next=request.path))
+        session["issue_form_authorized"] = True
+    elif not session.pop("issue_form_authorized", False):
+        return redirect(url_for("login", next=request.path))
+
     if request.method == "POST":
         file = request.files.get("certificate")
         if not file or not allowed_file(file.filename):

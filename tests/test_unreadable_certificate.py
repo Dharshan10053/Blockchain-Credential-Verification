@@ -77,7 +77,11 @@ def client(tmp_path, monkeypatch):
                 db_module.init_db()
                 db_module.create_user("admin_test", generate_password_hash("password"), "ADMIN")
             # Authenticate via browser session
-            test_client.post("/login", data={"username": "admin_test", "password": "password"})
+            test_client.post(
+                "/login?next=%2Fissue",
+                data={"username": "admin_test", "password": "password"},
+            )
+            test_client.get("/issue")
             # Also create a DB-backed API key for API route tests
             with app_module.app.app_context():
                 user = db_module.get_user_by_username("admin_test")

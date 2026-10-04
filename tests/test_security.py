@@ -5,8 +5,11 @@ Tests: headers, auth, input validation, error handlers, rate limiting.
 import os
 import sys
 import hashlib
+import re
 import secrets
 from urllib.parse import quote
+
+import pyotp
 
 # conftest.py handles env var setup before this runs
 from app import app, limiter
@@ -17,6 +20,7 @@ from backend.database.db import (
     get_user_by_api_key_hash,
     init_db,
     revoke_api_key,
+    update_user_totp,
     upsert_certificate,
 )
 from werkzeug.security import generate_password_hash
@@ -144,8 +148,40 @@ class TestAdminAccess:
         password = "test-session-password"
         assert create_user(username, generate_password_hash(password), "ADMIN")
         login = self.client.post(
-            "/login",
+            "/login?next=%2Fissue",
             data={"username": username, "password": password},
+        )
+        assert login.status_code == 302
+        first_issue_page = self.client.get("/issue")
+        assert first_issue_page.status_code == 200
+        old_form_csrf = re.search(
+            r'name="csrf_token"[^>]*value="([^"]+)"',
+            first_issue_page.get_data(as_text=True),
+        ).group(1)
+
+        refreshed = self.client.get("/issue")
+        assert refreshed.status_code == 302
+        assert "/login" in refreshed.headers.get("Location", "")
+        stale_form_post = self.client.post(
+            "/issue",
+            data={"csrf_token": old_form_csrf},
+        )
+        assert stale_form_post.status_code == 302
+        assert "/login" in stale_form_post.headers.get("Location", "")
+
+        login_page = self.client.get(refreshed.headers["Location"])
+        csrf_match = re.search(
+            r'name="csrf_token"[^>]*value="([^"]+)"',
+            login_page.get_data(as_text=True),
+        )
+        assert csrf_match
+        login = self.client.post(
+            refreshed.headers["Location"],
+            data={
+                "csrf_token": csrf_match.group(1),
+                "username": username,
+                "password": password,
+            },
         )
         assert login.status_code == 302
         assert self.client.get("/issue").status_code == 200
@@ -162,7 +198,7 @@ class TestAdminAccess:
         assert "/login" in response.headers.get("Location", "")
 
         login = self.client.post(
-            "/login",
+            "/login?next=%2Fissue",
             data={"username": username, "password": password},
         )
         assert login.status_code == 302
@@ -173,6 +209,33 @@ class TestAdminAccess:
         response = self.client.get("/issue")
         assert response.status_code == 302
         assert "/login" in response.headers.get("Location", "")
+
+    def test_two_factor_login_can_enter_issue_once(self, monkeypatch):
+        monkeypatch.setitem(self.client.application.config, "WTF_CSRF_ENABLED", False)
+        monkeypatch.setattr(limiter, "enabled", False)
+        init_db()
+
+        username = f"totp-issue-{secrets.token_hex(8)}"
+        password = "test-session-password"
+        assert create_user(username, generate_password_hash(password), "ADMIN")
+        user = get_user_by_username(username)
+        secret = pyotp.random_base32()
+        update_user_totp(user["id"], secret, [])
+
+        login = self.client.post(
+            "/login?next=%2Fissue",
+            data={"username": username, "password": password},
+        )
+        assert login.status_code == 302
+        verify = self.client.post(
+            login.headers["Location"],
+            data={"code": pyotp.TOTP(secret).now()},
+        )
+        assert verify.status_code == 302
+        assert self.client.get("/issue").status_code == 200
+        refreshed = self.client.get("/issue")
+        assert refreshed.status_code == 302
+        assert "/login" in refreshed.headers.get("Location", "")
 
     def test_ledger_with_query_param_still_redirects(self):
         """Admin key in URL query param must not work — headers only."""

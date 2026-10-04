@@ -9,6 +9,23 @@ from backend.database.db import init_db
 
 def _post_issue(client, details, cert_hash):
     form = client.get("/issue")
+    if form.status_code == 302:
+        username, password = client._admin_credentials
+        login_page = client.get(form.headers["Location"])
+        csrf_token = re.search(
+            r'name="csrf_token"[^>]*value="([^"]+)"',
+            login_page.get_data(as_text=True),
+        ).group(1)
+        login = client.post(
+            form.headers["Location"],
+            data={
+                "csrf_token": csrf_token,
+                "username": username,
+                "password": password,
+            },
+        )
+        assert login.status_code == 302
+        form = client.get("/issue")
     # /issue now requires authentication — if redirected to login, the test client
     # must already be authenticated (use admin_client fixture).
     token = re.search(
@@ -114,7 +131,11 @@ def test_browser_issue_flow_persists_duplicate_detection_across_restart(
         with app.app_context():
             init_db()
             create_user("admin_restart", generate_password_hash("password"), "ADMIN")
-        restarted_client.post("/login", data={"username": "admin_restart", "password": "password"})
+        restarted_client._admin_credentials = ("admin_restart", "password")
+        restarted_client.post(
+            "/login?next=%2Fissue",
+            data={"username": "admin_restart", "password": "password"},
+        )
         restarted_client._patched = True
 
         persisted_duplicate = _post_issue(restarted_client, details, first_hash)

@@ -15,6 +15,7 @@ import hashlib
 import io
 import json
 import os
+import re
 import secrets
 
 os.environ.setdefault("FLASK_ENV", "development")
@@ -216,6 +217,29 @@ def test_verify_still_processes_readable_certificate(client, monkeypatch):
     body = response.get_data(as_text=True)
     assert UNREADABLE_CERTIFICATE_MESSAGE not in body
     assert "Priya Sharma" in body
+
+
+def test_verification_displays_ocr_confidence_without_changing_authenticity(
+    client, monkeypatch
+):
+    words = re.findall(r"[^\W_]+", READABLE_CERTIFICATE_TEXT)
+    monkeypatch.setattr(
+        app_module,
+        "_get_tesseract_ocr_data",
+        lambda filepath: [{"text": word, "conf": 95} for word in words],
+    )
+
+    response = _upload(
+        client, "/verify", READABLE_CERTIFICATE_TEXT, monkeypatch
+    )
+    body = response.get_data(as_text=True)
+
+    assert response.status_code == 200
+    assert "Verification Failed" in body
+    assert "No exact SHA-256 match found on the blockchain" in body
+    assert "Field OCR confidence" in body
+    assert "Extraction completeness" in body
+    assert ">97%</span>" in body
 
 
 def test_issued_certificate_verifies_successfully(client, monkeypatch):

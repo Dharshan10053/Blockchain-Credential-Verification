@@ -51,11 +51,65 @@
           </div>
         </div>
         <div class="confidence-info">
-          {% if explanation %}
           <p class="confidence-explanation">{{ explanation }}</p>
-          {% else %}
-          <p class="confidence-explanation">Extraction completeness and hash matching influence this score.</p>
-          {% endif %}
+          <div class="confidence-breakdown">
+            <p>
+              <strong>Blockchain authenticity:</strong>
+              {% if status == "VERIFIED" %}
+                Exact SHA-256 match found on the blockchain.
+              {% else %}
+                No exact SHA-256 match found on the blockchain.
+              {% endif %}
+              This decision is independent of the confidence score.
+            </p>
+            <p>
+              <strong>Tesseract evidence:</strong>
+              {% if confidence_details.ocr_confidence_available %}
+                word-level OCR confidence was available.
+              {% else %}
+                unavailable for this upload; the score uses completeness
+                {% if confidence_details.consistency_score is not none %}and consistency checks{% endif %}.
+              {% endif %}
+            </p>
+            <p>
+              <strong>Extraction completeness:</strong>
+              {{ confidence_details.fields_found }}/{{ confidence_details.field_count }}
+              key fields ({{ confidence_details.completeness_score|round|int }}%).
+            </p>
+            <p><strong>Field OCR confidence:</strong></p>
+            <ul>
+              {% for field, label in [
+                ("name", "Name"),
+                ("course", "Course"),
+                ("university", "University"),
+                ("date", "Date"),
+                ("cert_id", "Certificate ID")
+              ] %}
+              <li>
+                {{ label }}:
+                {% if confidence_details.field_confidence[field] is not none %}
+                  {{ confidence_details.field_confidence[field]|round|int }}%
+                {% else %}
+                  unavailable
+                {% endif %}
+              </li>
+              {% endfor %}
+            </ul>
+            <p>
+              <strong>Consistency:</strong>
+              {% if confidence_details.consistency_score is not none %}
+                {{ confidence_details.consistency_score|round|int }}%
+              {% else %}
+                no applicable cross-check available
+              {% endif %}
+            </p>
+            <ul>
+              {% for check in confidence_details.consistency_checks %}
+              <li>{{ check }}</li>
+              {% endfor %}
+            </ul>
+            <p><strong>Formula:</strong> {{ confidence_details.formula }}.</p>
+          </div>
           
           {% if confidence_score < 85 and status == "VERIFIED" %}
           <div class="partial-extraction-notice">

@@ -32,6 +32,7 @@ from backend.utils.extraction_quality import (
     UNREADABLE_CERTIFICATE_MESSAGE,
     assess_extraction,
 )
+from backend.utils.verification_confidence import calculate_verification_confidence
 from backend.utils.report_generator import generate_report
 from backend.utils.auth import login_required, require_role, get_current_user
 from datetime import timedelta
@@ -331,7 +332,7 @@ def _ocr_image_cv(img_cv: np.ndarray) -> str:
         # Otsu pass essentially failed -- fall back to adaptive as primary.
         return _merge_ocr_text(adaptive_text, otsu_text)
     return _merge_ocr_text(otsu_text, adaptive_text)
-def _ocr_image_with_layout(img_cv: np.ndarray) -> dict:
+def _ocr_image_with_layout(img_cv: np.ndarray) -> list[dict]:
     """
     OCR with layout information using pytesseract.image_to_data().
     Returns structured OCR blocks with coordinates.
@@ -348,13 +349,17 @@ def _ocr_image_with_layout(img_cv: np.ndarray) -> dict:
         text = data["text"][i].strip()
         if not text:
             continue
+        try:
+            confidence = float(data["conf"][i])
+        except (TypeError, ValueError, IndexError):
+            confidence = -1.0
         blocks.append({
             "text": text,
             "x": data["left"][i],
             "y": data["top"][i],
             "w": data["width"][i],
             "h": data["height"][i],
-            "conf": int(data["conf"][i])
+            "conf": confidence
         })
     return blocks
 def _detect_name_from_layout(blocks: list) -> str:
@@ -550,6 +555,40 @@ def perform_ocr(filepath: str) -> str:
     except Exception as e:
         logger.error("OCR Error: %s", e)
         return ""
+
+
+def _get_tesseract_ocr_data(filepath: str) -> list[dict]:
+    """Return Tesseract word/confidence data where this upload used OCR."""
+    ext = filepath.rsplit(".", 1)[-1].lower() if "." in filepath else ""
+    try:
+        if ext in {"png", "jpg", "jpeg"}:
+            image = cv2.imread(filepath)
+            if image is None:
+                logger.warning("Cannot collect OCR confidence from unreadable image: %s", filepath)
+                return []
+            return _ocr_image_with_layout(image)
+        if ext != "pdf":
+            return []
+
+        with fitz.open(filepath) as document:
+            digital_text_length = sum(
+                len(page.get_text("text")) for page in document
+            )
+        if digital_text_length > 200:
+            return []
+
+        poppler_path = r"C:\poppler\Library\bin\poppler-25.12.0\Library\bin"
+        pages = convert_from_path(filepath, dpi=450, poppler_path=poppler_path)
+        ocr_data = []
+        for page_image in pages:
+            image = cv2.cvtColor(np.array(page_image), cv2.COLOR_RGB2BGR)
+            ocr_data.extend(_ocr_image_with_layout(image))
+        return ocr_data
+    except Exception as e:
+        logger.warning("Unable to collect Tesseract confidence data: %s", e)
+        return []
+
+
 # ----------------------------------
 # FIELD EXTRACTION HELPERS
 # ----------------------------------
@@ -1448,23 +1487,18 @@ def verify():
         status = verify_certificate(cert_hash)
         if status == "VERIFIED":
             session["report_cert_hash"] = cert_hash
-        # result.html's display fields, derived directly from the existing
-        # status values already returned by verify_certificate() above
-        # ("VERIFIED" / "FAKE") -- no new verification system, just
-        # mapping the existing binary result to the fields the template
-        # already expects. confidence_score reflects the same binary
-        # hash-match result already computed by verify_certificate().
+        confidence = calculate_verification_confidence(
+            details, _get_tesseract_ocr_data(filepath)
+        )
         if status == "VERIFIED":
-            color, label, message, confidence_score = (
+            color, label, message = (
                 "green", "Certificate Verified",
                 "This certificate has been verified and found on the blockchain ledger.",
-                100,
             )
         else:  # "FAKE"
-            color, label, message, confidence_score = (
+            color, label, message = (
                 "red", "Verification Failed",
                 "This certificate could not be verified against the blockchain ledger.",
-                0,
             )
         return render_template(
             "result.html",
@@ -1473,7 +1507,12 @@ def verify():
             color=color,
             label=label,
             message=message,
-            confidence_score=confidence_score,
+            confidence_score=confidence["confidence_score"],
+            confidence_details=confidence,
+            explanation=(
+                "Extraction quality score. Authenticity is determined separately "
+                "by whether the SHA-256 hash matches the blockchain."
+            ),
             name=details["name"],
             course=details["course"],
             date=details["date"],

@@ -7,6 +7,7 @@ import os
 import io
 import tempfile
 from datetime import datetime, timezone
+from xml.sax.saxutils import escape
 
 logger = logging.getLogger(__name__)
 
@@ -137,7 +138,7 @@ def generate_report(result: dict, base_url: str = None) -> str:
             c.drawString(2*cm, text_y, lbl.upper())
             
             # Draw Value with wrapping
-            p = Paragraph(str(val), value_style)
+            p = Paragraph(escape(str(val)), value_style)
             w, h = p.wrap(left_col_width, height)
             p.drawOn(c, 2*cm, text_y - h - 0.2*cm)
             

@@ -1,5 +1,6 @@
 import io
 import re
+from pathlib import Path
 
 import fitz
 
@@ -7,6 +8,10 @@ import app as app_module
 from app import app
 from backend.database import db
 from werkzeug.security import generate_password_hash
+
+_SAMPLE_IMAGE = (
+    Path(__file__).resolve().parents[1] / "test_images" / "sample.png"
+).read_bytes()
 
 
 def _post_issue(client):
@@ -20,7 +25,7 @@ def _post_issue(client):
         "/issue",
         data={
             "csrf_token": token,
-            "certificate": (io.BytesIO(b"certificate"), "certificate.png"),
+            "certificate": (io.BytesIO(_SAMPLE_IMAGE), "certificate.jpg"),
         },
         content_type="multipart/form-data",
     )
@@ -36,7 +41,7 @@ def _post_verify(client):
         "/verify",
         data={
             "csrf_token": token,
-            "certificate": (io.BytesIO(b"certificate"), "certificate.png"),
+            "certificate": (io.BytesIO(_SAMPLE_IMAGE), "certificate.jpg"),
         },
         content_type="multipart/form-data",
     )

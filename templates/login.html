@@ -4,38 +4,85 @@
 {% block head_extra %}
 <style>
   .login-shell {
-    min-height: calc(100vh - 190px);
+    min-height: calc(100vh - 140px);
     display: grid;
     place-items: center;
     padding: 48px 24px 64px;
     position: relative;
-    isolation: isolate;
+    z-index: 2;
+    background: transparent;
   }
 
-  .login-shell::before {
-    content: "";
+  /* ── Full-Viewport Living Mesh Background (Style A) ── */
+  .login-bg-viewport {
+    position: fixed;
+    top: 0;
+    left: 0;
+    width: 100vw;
+    height: 100vh;
+    z-index: 0;
+    pointer-events: none;
+    overflow: hidden;
+    background-color: #050a14;
+  }
+
+  .login-mesh-canvas {
     position: absolute;
-    z-index: -1;
-    width: min(760px, 90vw);
-    height: 460px;
-    left: 50%;
-    top: 50%;
-    transform: translate(-50%, -50%);
-    background: radial-gradient(ellipse, rgba(37, 99, 235, 0.16), transparent 68%);
+    top: 0;
+    left: 0;
+    width: 100%;
+    height: 100%;
+    display: block;
     pointer-events: none;
   }
 
+  .login-ambient-orb {
+    position: absolute;
+    border-radius: 50%;
+    filter: blur(140px);
+    pointer-events: none;
+    opacity: 0.44;
+    mix-blend-mode: screen;
+    transform: translateZ(0);
+  }
+
+  .orb-blue {
+    width: min(820px, 68vw);
+    height: min(820px, 68vw);
+    left: -14vw;
+    top: -14vh;
+    background: radial-gradient(circle, rgba(37, 99, 235, 0.30) 0%, rgba(30, 64, 175, 0.08) 55%, transparent 70%);
+  }
+
+  .orb-cyan {
+    width: min(780px, 64vw);
+    height: min(780px, 64vw);
+    right: -10vw;
+    top: 18vh;
+    background: radial-gradient(circle, rgba(6, 182, 212, 0.25) 0%, rgba(14, 116, 144, 0.06) 55%, transparent 70%);
+  }
+
+  .orb-indigo {
+    width: min(800px, 66vw);
+    height: min(800px, 66vw);
+    left: 22vw;
+    bottom: -20vh;
+    background: radial-gradient(circle, rgba(79, 70, 229, 0.20) 0%, rgba(30, 58, 138, 0.05) 55%, transparent 70%);
+  }
+
   .login-panel {
+    position: relative;
+    z-index: 3;
     width: min(100%, 960px);
     display: grid;
     grid-template-columns: 1.02fr 0.98fr;
     overflow: hidden;
-    border: 1px solid rgba(148, 163, 184, 0.16);
+    border: 1px solid rgba(148, 163, 184, 0.22);
     border-radius: 24px;
-    background: rgba(10, 16, 30, 0.88);
-    box-shadow: 0 28px 80px rgba(0, 0, 0, 0.48), inset 0 1px 0 rgba(255, 255, 255, 0.05);
-    backdrop-filter: blur(22px);
-    -webkit-backdrop-filter: blur(22px);
+    background: rgba(8, 14, 28, 0.88);
+    box-shadow: 0 32px 90px rgba(0, 0, 0, 0.65), 0 0 45px rgba(6, 182, 212, 0.08), inset 0 1px 0 rgba(255, 255, 255, 0.08);
+    backdrop-filter: blur(24px);
+    -webkit-backdrop-filter: blur(24px);
   }
 
   .login-aside {
@@ -200,6 +247,41 @@
     transition: border-color 160ms ease, box-shadow 160ms ease, background 160ms ease;
   }
 
+  .login-password-control { position: relative; }
+  .login-password-control input { padding-right: 50px; }
+
+  .login-password-toggle {
+    position: absolute;
+    top: 50%;
+    right: 8px;
+    width: 34px;
+    height: 34px;
+    display: grid;
+    place-items: center;
+    transform: translateY(-50%);
+    border: 0;
+    border-radius: 8px;
+    background: transparent;
+    color: #94a3b8;
+    cursor: pointer;
+    transition: background 160ms ease, color 160ms ease;
+  }
+
+  .login-password-toggle:hover,
+  .login-password-toggle:focus-visible {
+    outline: none;
+    background: rgba(148, 163, 184, 0.12);
+    color: #e0f2fe;
+  }
+
+  .login-password-toggle:focus-visible {
+    box-shadow: 0 0 0 2px rgba(56, 189, 248, 0.65);
+  }
+
+  .login-password-toggle .eye-visible { display: none; }
+  .login-password-toggle[aria-pressed="true"] .eye-hidden { display: none; }
+  .login-password-toggle[aria-pressed="true"] .eye-visible { display: block; }
+
   .login-field input:hover { border-color: rgba(148, 163, 184, 0.36); }
   .login-field input:focus {
     border-color: rgba(56, 189, 248, 0.76);
@@ -253,11 +335,26 @@
     .login-shell { padding-right: 12px; padding-left: 12px; }
     .login-aside, .login-form-side { padding-right: 22px; padding-left: 22px; }
   }
+
+  @media (prefers-reduced-motion: reduce) {
+    .login-ambient-orb {
+      opacity: 0.25;
+      filter: blur(100px);
+    }
+  }
 </style>
 {% endblock %}
 
 {% block content %}
-<div class="login-shell">
+<!-- Full-viewport fixed Living Mesh background layer (Style A, 100vw × 100vh) -->
+<div id="login-bg-viewport" class="login-bg-viewport" aria-hidden="true">
+  <div class="login-ambient-orb orb-blue"></div>
+  <div class="login-ambient-orb orb-cyan"></div>
+  <div class="login-ambient-orb orb-indigo"></div>
+  <canvas id="login-mesh-canvas" class="login-mesh-canvas"></canvas>
+</div>
+
+<div class="login-shell" id="login-shell">
   <section class="login-panel fade-up" aria-labelledby="login-heading">
     <div class="login-aside">
       <div class="login-mark" aria-hidden="true">
@@ -300,7 +397,26 @@
 
           <div class="login-field">
             <label for="password">Password</label>
-            <input type="password" id="password" name="password" required autocomplete="current-password">
+            <div class="login-password-control">
+              <input type="password" id="password" name="password" required autocomplete="current-password">
+              <button
+                type="button"
+                class="login-password-toggle"
+                id="password-visibility-toggle"
+                aria-label="Show password"
+                aria-pressed="false"
+                aria-controls="password"
+              >
+                <svg class="eye-hidden" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" aria-hidden="true">
+                  <path d="M2.5 12s3.4-6 9.5-6 9.5 6 9.5 6-3.4 6-9.5 6-9.5-6Z"/>
+                  <circle cx="12" cy="12" r="2.5"/>
+                </svg>
+                <svg class="eye-visible" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" aria-hidden="true">
+                  <path d="M3 3l18 18M10.6 6.2A10.8 10.8 0 0 1 12 6c6.1 0 9.5 6 9.5 6a16.6 16.6 0 0 1-3.1 3.6M6.2 6.3C3.8 8 2.5 12 2.5 12s3.4 6 9.5 6c1 0 1.9-.2 2.7-.5"/>
+                  <path d="M9.9 9.9a3 3 0 0 0 4.2 4.2"/>
+                </svg>
+              </button>
+            </div>
           </div>
 
           <button type="submit" class="btn btn-primary login-submit">Sign in securely</button>
@@ -317,4 +433,402 @@
     </div>
   </section>
 </div>
+{% endblock %}
+
+{% block scripts %}
+<script>
+  /* ── Password Visibility Toggle ── */
+  (function () {
+    var password = document.getElementById("password");
+    var toggle = document.getElementById("password-visibility-toggle");
+    if (!password || !toggle) return;
+
+    toggle.addEventListener("click", function () {
+      var showPassword = password.type === "password";
+      password.type = showPassword ? "text" : "password";
+      toggle.setAttribute("aria-pressed", String(showPassword));
+      toggle.setAttribute("aria-label", showPassword ? "Hide password" : "Show password");
+    });
+  })();
+
+  /* ── Full-Viewport Living Mesh Background Engine (Style A) ── */
+  (function () {
+    var canvas = document.getElementById("login-mesh-canvas");
+    if (!canvas) return;
+
+    var ctx = canvas.getContext("2d");
+    if (!ctx) return;
+
+    var width = 0;
+    var height = 0;
+    var dpr = 1;
+    var rafId = null;
+    var isVisible = true;
+    var prefersReduced = window.matchMedia("(prefers-reduced-motion: reduce)").matches;
+
+    // Mesh Grid Config
+    var ROWS = 32;
+    var COLS = 64;
+    var grid = []; // [ROWS][COLS]
+    var particles = [];
+    var pulses = [];
+
+    // Mouse & Parallax Tracking
+    var mouseX = -9999;
+    var mouseY = -9999;
+    var curMouseX = -9999;
+    var curMouseY = -9999;
+    var mouseActive = false;
+
+    var time = 0;
+
+    // ── Setup Grid & Wave Elements ──
+    function initMesh() {
+      var isMobile = width < 768;
+      ROWS = isMobile ? 22 : 32;
+      COLS = isMobile ? 44 : 66;
+
+      grid = [];
+      for (var r = 0; r < ROWS; r++) {
+        var row = [];
+        for (var c = 0; c < COLS; c++) {
+          row.push({
+            u: c / (COLS - 1),
+            v: r / (ROWS - 1),
+            baseX: 0,
+            baseY: 0,
+            sx: 0,
+            sy: 0,
+            elev: 0
+          });
+        }
+        grid.push(row);
+      }
+
+      // Dotted Particles Traveling Along Wave Contours
+      particles = [];
+      var particleCount = isMobile ? 45 : 85;
+      for (var p = 0; p < particleCount; p++) {
+        particles.push({
+          u: Math.random(),
+          row: Math.floor(Math.random() * (ROWS - 4)) + 2,
+          speed: Math.random() * 0.00075 + 0.00035,
+          size: Math.random() * 1.8 + 1.2,
+          isCyan: Math.random() > 0.42,
+          pulseOffset: Math.random() * Math.PI * 2
+        });
+      }
+
+      // Shimmer Wave Light Pulses
+      pulses = [];
+      for (var s = 0; s < 3; s++) {
+        pulses.push({
+          progress: Math.random(),
+          speed: Math.random() * 0.0035 + 0.0025,
+          rowCenter: Math.floor(Math.random() * (ROWS - 8)) + 4,
+          rowRadius: Math.floor(Math.random() * 3) + 2
+        });
+      }
+    }
+
+    // ── Full-Viewport Resize ──
+    function resize() {
+      width = window.innerWidth;
+      height = window.innerHeight;
+      dpr = Math.min(window.devicePixelRatio || 1, 2);
+
+      canvas.width = Math.floor(width * dpr);
+      canvas.height = Math.floor(height * dpr);
+      canvas.style.width = width + "px";
+      canvas.style.height = height + "px";
+
+      ctx.setTransform(1, 0, 0, 1, 0, 0);
+      ctx.scale(dpr, dpr);
+
+      initMesh();
+      if (prefersReduced) {
+        drawFrame();
+      }
+    }
+
+    // ── Mouse & Touch Tracking ──
+    function onMouseMove(e) {
+      if (prefersReduced) return;
+      mouseX = e.clientX;
+      mouseY = e.clientY;
+      mouseActive = true;
+    }
+
+    function onMouseLeave() {
+      mouseActive = false;
+      mouseX = -9999;
+      mouseY = -9999;
+    }
+
+    window.addEventListener("mousemove", onMouseMove, { passive: true });
+    window.addEventListener("mouseleave", onMouseLeave, { passive: true });
+
+    // ── Render Living Mesh Frame ──
+    function drawFrame() {
+      // 1. Base Dark Navy Clear (#050A14)
+      ctx.fillStyle = "#050a14";
+      ctx.fillRect(0, 0, width, height);
+
+      // Smooth mouse interpolation
+      if (mouseActive) {
+        if (curMouseX < -5000) {
+          curMouseX = mouseX;
+          curMouseY = mouseY;
+        } else {
+          curMouseX += (mouseX - curMouseX) * 0.08;
+          curMouseY += (mouseY - curMouseY) * 0.08;
+        }
+      } else {
+        curMouseX = -9999;
+        curMouseY = -9999;
+      }
+
+      var t = time * 0.00065; // Slow, organic, soothing wave velocity
+
+      // 2. Soft Atmospheric Radiance Blooms (Luminous Underlay)
+      var bloomX1 = width * (0.26 + Math.sin(t * 0.45) * 0.06);
+      var bloomY1 = height * (0.32 + Math.cos(t * 0.38) * 0.05);
+      var gradBloom1 = ctx.createRadialGradient(bloomX1, bloomY1, 30, bloomX1, bloomY1, width * 0.48);
+      gradBloom1.addColorStop(0, "rgba(37, 99, 235, 0.15)");
+      gradBloom1.addColorStop(0.6, "rgba(30, 64, 175, 0.04)");
+      gradBloom1.addColorStop(1, "transparent");
+      ctx.fillStyle = gradBloom1;
+      ctx.fillRect(0, 0, width, height);
+
+      var bloomX2 = width * (0.75 + Math.cos(t * 0.42) * 0.06);
+      var bloomY2 = height * (0.58 + Math.sin(t * 0.35) * 0.06);
+      var gradBloom2 = ctx.createRadialGradient(bloomX2, bloomY2, 30, bloomX2, bloomY2, width * 0.44);
+      gradBloom2.addColorStop(0, "rgba(6, 182, 212, 0.13)");
+      gradBloom2.addColorStop(0.6, "rgba(14, 116, 144, 0.03)");
+      gradBloom2.addColorStop(1, "transparent");
+      ctx.fillStyle = gradBloom2;
+      ctx.fillRect(0, 0, width, height);
+
+      // 3. Compute Mesh Wave Coordinates & 3D Topographic Projection
+      for (var r = 0; r < ROWS; r++) {
+        var row = grid[r];
+        for (var c = 0; c < COLS; c++) {
+          var pt = row[c];
+          pt.baseX = (pt.u * 1.26 - 0.13) * width;
+          pt.baseY = (pt.v * 1.18 - 0.09) * height;
+
+          // Compound sinusoidal harmonics
+          var w1 = Math.sin(pt.u * 4.8 + pt.v * 2.4 + t * 0.95) * 44;
+          var w2 = Math.cos(pt.u * 7.5 - pt.v * 3.8 - t * 0.72) * 26;
+          var w3 = Math.sin((pt.u * 1.2 + pt.v) * 6.5 + t * 0.5) * 20;
+          var w4 = Math.cos((pt.u - pt.v * 0.7) * 3.6 - t * 0.4) * 32;
+          var elev = w1 + w2 + w3 + w4;
+
+          // Subtle interactive mouse deflection
+          if (curMouseX > -5000) {
+            var dx = pt.baseX - curMouseX;
+            var dy = pt.baseY - curMouseY;
+            var dist = Math.sqrt(dx * dx + dy * dy);
+            if (dist < 320) {
+              var mFactor = (1 - dist / 320);
+              elev += mFactor * mFactor * 36 * Math.cos(t * 2.8 - dist * 0.022);
+            }
+          }
+
+          pt.elev = elev;
+          // Perspective projection: higher peaks lift upward and fan slightly with depth
+          pt.sx = pt.baseX + (elev * 0.18) * (pt.u - 0.5);
+          pt.sy = pt.baseY - elev * 0.82;
+        }
+      }
+
+      // Update Shimmer Wave Pulses
+      if (!prefersReduced) {
+        for (var pi = 0; pi < pulses.length; pi++) {
+          var pulse = pulses[pi];
+          pulse.progress += pulse.speed;
+          if (pulse.progress >= 1.0) {
+            pulse.progress = 0;
+            pulse.rowCenter = Math.floor(Math.random() * (ROWS - 8)) + 4;
+          }
+        }
+      }
+
+      // 4. Draw Transverse Connecting Ribs (Subtle Topo-Lattice Mesh)
+      ctx.lineWidth = 0.5;
+      for (var colIdx = 0; colIdx < COLS; colIdx += 4) {
+        ctx.beginPath();
+        for (var ribR = 0; ribR < ROWS; ribR++) {
+          var ribPt = grid[ribR][colIdx];
+          // time‑based sinusoidal offset for organic undulation
+          var offset = Math.sin((ribR / ROWS) * Math.PI * 2 + t * 1.3) * 12;
+          var x = ribPt.sx + offset * (ribPt.u - 0.5);
+          var y = ribPt.sy + offset * (ribPt.v - 0.5);
+          if (ribR === 0) {
+            ctx.moveTo(x, y);
+          } else {
+            ctx.lineTo(x, y);
+          }
+        }
+        var colEdge = Math.sin((colIdx / (COLS - 1)) * Math.PI);
+        var alpha = 0.02 + colEdge * 0.05; // softer, less bright
+        ctx.strokeStyle = "rgba(56, 189, 248, " + alpha + ")";
+        ctx.stroke();
+      }
+
+      // 5. Draw Longitudinal Flow Curves (Wave Ribbons)
+      for (var rIdx = 0; rIdx < ROWS; rIdx++) {
+        var waveRow = grid[rIdx];
+        var edgeFactor = Math.sin((rIdx / (ROWS - 1)) * Math.PI);
+        var baseAlpha = (0.16 + edgeFactor * 0.38);
+
+        // Check if a shimmer pulse is boosting this wave row
+        var pulseBoost = 0;
+        for (var pIdx = 0; pIdx < pulses.length; pIdx++) {
+          var pRowDist = Math.abs(rIdx - pulses[pIdx].rowCenter);
+          if (pRowDist <= pulses[pIdx].rowRadius) {
+            var pInf = 1 - (pRowDist / pulses[pIdx].rowRadius);
+            pulseBoost = Math.max(pulseBoost, pInf * 0.28);
+          }
+        }
+        var finalAlpha = Math.min(baseAlpha + pulseBoost, 0.85);
+
+        // Continuous linear gradient across wave line: Deep Blue -> Electric Blue -> Cyan -> Deep Sapphire
+        var waveGrad = ctx.createLinearGradient(0, 0, width, 0);
+        waveGrad.addColorStop(0, "rgba(30, 64, 175, " + (finalAlpha * 0.55) + ")");
+        waveGrad.addColorStop(0.32, "rgba(37, 99, 235, " + (finalAlpha * 0.92) + ")");
+        waveGrad.addColorStop(0.68, "rgba(34, 211, 238, " + (finalAlpha * 1.0) + ")");
+        waveGrad.addColorStop(1, "rgba(29, 78, 216, " + (finalAlpha * 0.65) + ")");
+
+        ctx.beginPath();
+        ctx.moveTo(waveRow[0].sx, waveRow[0].sy);
+        for (var cIdx = 0; cIdx < COLS - 1; cIdx++) {
+          var pCurrent = waveRow[cIdx];
+          var pNext = waveRow[cIdx + 1];
+          // add subtle per-row sinusoidal offset for organic flow
+          var rowOffset = Math.sin((rIdx / ROWS) * Math.PI * 2 + t * 0.6) * 8;
+          var offsetX = (pCurrent.u - 0.5) * rowOffset;
+          var offsetY = (pCurrent.v - 0.5) * rowOffset;
+          var ctrlX = pCurrent.sx + offsetX;
+          var ctrlY = pCurrent.sy + offsetY;
+          var midX = (ctrlX + pNext.sx) * 0.5;
+          var midY = (ctrlY + pNext.sy) * 0.5;
+          ctx.quadraticCurveTo(ctrlX, ctrlY, midX, midY);
+        }
+        ctx.lineTo(waveRow[COLS - 1].sx, waveRow[COLS - 1].sy);
+
+        ctx.lineWidth = (rIdx % 4 === 0) ? 1.4 : 0.85;
+        ctx.strokeStyle = waveGrad;
+        ctx.stroke();
+
+        // Stippled intersection nodes along crests
+        if (rIdx % 2 === 0) {
+          for (var dotC = (rIdx % 3); dotC < COLS; dotC += 4) {
+            var dotPt = waveRow[dotC];
+            var dotElevNorm = (dotPt.elev + 70) / 140; // 0 (trough) to 1 (peak)
+            if (dotElevNorm > 0.42) {
+              var dotR = 1.0 + dotElevNorm * 0.8;
+              ctx.beginPath();
+              ctx.arc(dotPt.sx, dotPt.sy, dotR, 0, Math.PI * 2);
+              ctx.fillStyle = dotElevNorm > 0.75
+                ? "rgba(34, 211, 238, " + (dotElevNorm * 0.7) + ")"
+                : "rgba(59, 130, 246, " + (dotElevNorm * 0.5) + ")";
+              ctx.fill();
+            }
+          }
+        }
+      }
+
+      // 6. Draw Flowing Dotted Particles (Gliding along Wave Contours)
+      for (var p = 0; p < particles.length; p++) {
+        var part = particles[p];
+        if (!prefersReduced) {
+          part.u = (part.u + part.speed) % 1.0;
+        }
+
+        var pRow = grid[part.row];
+        if (!pRow) continue;
+
+        var colFloat = part.u * (COLS - 1);
+        var col0 = Math.floor(colFloat);
+        var col1 = Math.min(col0 + 1, COLS - 1);
+        var frac = colFloat - col0;
+
+        var partX = pRow[col0].sx + (pRow[col1].sx - pRow[col0].sx) * frac;
+        var partY = pRow[col0].sy + (pRow[col1].sy - pRow[col0].sy) * frac;
+
+        var pulseScale = Math.sin(t * 3.0 + part.pulseOffset) * 0.3 + 0.8;
+        var rCore = part.size * pulseScale;
+        var rHalo = rCore * 2.8;
+
+        // Outer glow halo
+        ctx.beginPath();
+        ctx.arc(partX, partY, rHalo, 0, Math.PI * 2);
+        ctx.fillStyle = part.isCyan ? "rgba(6, 182, 212, 0.12)" : "rgba(37, 99, 235, 0.12)";
+        ctx.fill();
+
+        // Concentrated bright core
+        ctx.beginPath();
+        ctx.arc(partX, partY, rCore, 0, Math.PI * 2);
+        ctx.fillStyle = part.isCyan ? "rgba(34, 211, 238, 0.6)" : "rgba(96, 165, 250, 0.6)";
+        ctx.fill();
+      }
+    }
+
+    // ── Animation Loop Engine ──
+    var lastTime = 0;
+    function loop(now) {
+      if (!isVisible) return;
+      var dt = now - (lastTime || now);
+      lastTime = now;
+      time += Math.min(dt, 32); // Max delta clamp
+
+      drawFrame();
+      rafId = requestAnimationFrame(loop);
+    }
+
+    // ── Lifecycle Controls ──
+    function start() {
+      if (prefersReduced) {
+        drawFrame();
+        return;
+      }
+      if (!rafId) {
+        lastTime = performance.now();
+        rafId = requestAnimationFrame(loop);
+      }
+    }
+
+    function stop() {
+      if (rafId) {
+        cancelAnimationFrame(rafId);
+        rafId = null;
+      }
+    }
+
+    document.addEventListener("visibilitychange", function () {
+      isVisible = !document.hidden;
+      if (isVisible) {
+        start();
+      } else {
+        stop();
+      }
+    });
+
+    // Handle OS reduced-motion accessibility preference changes
+    window.matchMedia("(prefers-reduced-motion: reduce)").addEventListener("change", function (e) {
+      prefersReduced = e.matches;
+      if (prefersReduced) {
+        stop();
+        drawFrame();
+      } else {
+        start();
+      }
+    });
+
+    window.addEventListener("resize", resize, { passive: true });
+    resize();
+    start();
+  })();
+</script>
 {% endblock %}

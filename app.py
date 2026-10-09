@@ -87,6 +87,26 @@ if not _secret_key:
             "FLASK_ENV=development for local runs."
         )
     _secret_key = secrets.token_hex(32)
+elif not IS_DEVELOPMENT and (
+    len(_secret_key) < 32
+    or any(
+        marker in _secret_key.casefold()
+        for marker in ("your_", "change_me", "changeme", "placeholder", "example")
+    )
+):
+    raise RuntimeError(
+        "SECRET_KEY must be a non-placeholder value of at least 32 characters "
+        "in production."
+    )
+_gemini_api_key = os.environ.get("GEMINI_API_KEY")
+if _gemini_api_key and not IS_DEVELOPMENT and (
+    len(_gemini_api_key) < 20
+    or any(
+        marker in _gemini_api_key.casefold()
+        for marker in ("your_", "change_me", "changeme", "placeholder", "example")
+    )
+):
+    raise RuntimeError("GEMINI_API_KEY must be a non-placeholder value in production.")
 app.secret_key = _secret_key
 app.config.update(
     SESSION_COOKIE_SECURE=True,
@@ -104,6 +124,8 @@ BLOCKCHAIN_FILE = os.path.join(os.path.dirname(os.path.abspath(__file__)), "bloc
 LEGACY_BLOCKCHAIN_FILE = os.path.join(os.path.dirname(os.path.abspath(__file__)), "blockchain.txt")
 os.makedirs(UPLOAD_FOLDER, exist_ok=True)
 ALLOWED_EXTENSIONS = {"pdf", "png", "jpg", "jpeg"}
+MAX_IMAGE_PIXELS = 20_000_000
+MAX_PDF_PAGES = 5
 # Reject request bodies over 16 MB before they ever hit disk (DoS mitigation).
 # Certificates are small documents/images; 16 MB is generous headroom.
 app.config["MAX_CONTENT_LENGTH"] = 16 * 1024 * 1024
@@ -176,6 +198,37 @@ def _save_uploaded_file(file) -> str:
     filepath = os.path.join(UPLOAD_FOLDER, filename)
     file.save(filepath)
     return filepath
+
+
+def _upload_content_is_valid(file) -> bool:
+    """Verify upload bytes agree with the allowed extension before saving."""
+    filename = secure_filename(file.filename or "")
+    extension = filename.rsplit(".", 1)[-1].lower() if "." in filename else ""
+    stream = file.stream
+    try:
+        stream.seek(0)
+        header = stream.read(1024)
+        stream.seek(0)
+        if extension == "pdf":
+            return b"%PDF-" in header
+        if extension not in {"png", "jpg", "jpeg"}:
+            return False
+        expected_format = "PNG" if extension == "png" else "JPEG"
+        with Image.open(stream) as image:
+            if image.format != expected_format:
+                return False
+            if image.width * image.height > MAX_IMAGE_PIXELS:
+                return False
+            image.verify()
+        return True
+    except (OSError, ValueError, Image.DecompressionBombError):
+        return False
+    finally:
+        stream.seek(0)
+
+
+def _password_is_acceptable(password: str) -> bool:
+    return isinstance(password, str) and 12 <= len(password) <= 1024
 # ----------------------------------
 # IMAGE PREPROCESSING
 # ----------------------------------
@@ -462,6 +515,9 @@ def _ocr_pdf(file_path: str) -> str:
     digital_text_parts = []
     try:
         doc = fitz.open(file_path)
+        if doc.page_count > MAX_PDF_PAGES:
+            doc.close()
+            raise ValueError(f"PDF exceeds the {MAX_PDF_PAGES}-page upload limit.")
         for page in doc:
             # Extract blocks to maintain layout integrity
             blocks = page.get_text("blocks")
@@ -473,6 +529,8 @@ def _ocr_pdf(file_path: str) -> str:
                 if block_text:
                     digital_text_parts.append(block_text)
         doc.close()
+    except ValueError:
+        raise
     except Exception as e:
         logger.warning(f"Digital extraction failed: {e}")
     combined_digital = "\n".join(digital_text_parts)
@@ -1216,11 +1274,15 @@ def home():
 @limiter.limit("5 per minute", methods=["POST"])
 def login():
     if request.method == "POST":
-        username = request.form.get("username")
-        password = request.form.get("password")
-        
+        username = (request.form.get("username") or "").strip()
+        password = request.form.get("password") or ""
+
         from backend.database.db import get_user_by_username, update_last_login
-        user = get_user_by_username(username)
+        user = (
+            get_user_by_username(username)
+            if len(username) <= 64 and len(password) <= 1024
+            else None
+        )
         
         if user and user["is_active"] and werkzeug.security.check_password_hash(user["password_hash"], password):
             if user.get("email") and not user.get("email_verified"):
@@ -1292,7 +1354,12 @@ def register():
         username = request.form.get("username", "").strip()
         email = request.form.get("email", "").strip().lower()
         password = request.form.get("password", "")
-        if not username or "@" not in email or len(password) < 8:
+        if (
+            not re.fullmatch(r"[A-Za-z0-9_.-]{3,64}", username)
+            or len(email) > 254
+            or not re.fullmatch(r"[^@\s]+@[^@\s]+\.[^@\s]+", email)
+            or not _password_is_acceptable(password)
+        ):
             return render_template("login.html", error="Invalid registration details."), 400
         if not create_user(username, werkzeug.security.generate_password_hash(password), "VERIFIER", email=email):
             return render_template("login.html", error="Unable to register with those details."), 400
@@ -1397,9 +1464,11 @@ def forgot_password():
 @app.route("/reset-password/<token>", methods=["GET", "POST"])
 def reset_password(token):
     if request.method == "POST":
-        user_id = consume_auth_token(token, "password_reset")
         password = request.form.get("password", "")
-        if user_id is None or len(password) < 8:
+        if not _password_is_acceptable(password):
+            return render_template("login.html", error="Invalid or expired reset link."), 400
+        user_id = consume_auth_token(token, "password_reset")
+        if user_id is None:
             return render_template("login.html", error="Invalid or expired reset link."), 400
         set_user_password(user_id, werkzeug.security.generate_password_hash(password))
         return redirect(url_for("login"))
@@ -1417,7 +1486,11 @@ def issue():
 
     if request.method == "POST":
         file = request.files.get("certificate")
-        if not file or not allowed_file(file.filename):
+        if (
+            not file
+            or not allowed_file(file.filename)
+            or not _upload_content_is_valid(file)
+        ):
             return render_template("issue.html", error="Invalid file type."), 400
         filepath = _save_uploaded_file(file)
         text = perform_ocr(filepath)
@@ -1474,7 +1547,11 @@ def issue():
 def verify():
     if request.method == "POST":
         file = request.files.get("certificate")
-        if not file or not allowed_file(file.filename):
+        if (
+            not file
+            or not allowed_file(file.filename)
+            or not _upload_content_is_valid(file)
+        ):
             return render_template("verify.html", error="Invalid file type."), 400
         filepath = _save_uploaded_file(file)
         text = perform_ocr(filepath)
@@ -1570,7 +1647,11 @@ def verify_token(token):
     record = get_certificate_by_token(token)
     if not record:
         return _render_error_page("errors/404.html", 404, "Certificate not found.")
-    return jsonify(record)
+    response = jsonify(
+        {key: value for key, value in record.items() if key != "verification_token"}
+    )
+    response.headers["Cache-Control"] = "no-store"
+    return response
 
 
 @app.route("/ledger")
@@ -1706,7 +1787,11 @@ def _details_to_api(details, cert_hash):
 @csrf.exempt
 def api_issue():
     file = request.files.get("certificate")
-    if not file or not allowed_file(file.filename):
+    if (
+        not file
+        or not allowed_file(file.filename)
+        or not _upload_content_is_valid(file)
+    ):
         return jsonify({"error": "Invalid file type"}), 400
     try:
         details, cert_hash = _process_upload(file)
@@ -1724,7 +1809,11 @@ def api_issue():
 @csrf.exempt
 def api_verify():
     file = request.files.get("certificate")
-    if not file or not allowed_file(file.filename):
+    if (
+        not file
+        or not allowed_file(file.filename)
+        or not _upload_content_is_valid(file)
+    ):
         return jsonify({"error": "Invalid file type"}), 400
     try:
         details, cert_hash = _process_upload(file)

@@ -12,6 +12,13 @@ import fitz  # PyMuPDF
 
 app = Flask(__name__)
 
+
+@app.before_request
+def disable_legacy_app_outside_development():
+    if os.environ.get("FLASK_ENV", "production").lower() != "development":
+        return "Not Found", 404
+
+
 UPLOAD_FOLDER = "uploads"
 BLOCKCHAIN_FILE = "blockchain.txt"
 
@@ -264,4 +271,4 @@ def verify():
 # RUN APP
 # ----------------------------------
 if __name__ == "__main__":
-    app.run(debug=True)
+    app.run(debug=os.environ.get("FLASK_ENV", "production").lower() == "development")

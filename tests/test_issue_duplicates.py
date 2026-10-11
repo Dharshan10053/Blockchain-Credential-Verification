@@ -1,10 +1,19 @@
 import io
 import json
 import re
+from pathlib import Path
 
 import app as app_module
 from app import app
 from backend.database.db import init_db
+
+_SAMPLE_IMAGE = (
+    Path(__file__).resolve().parents[1] / "test_images" / "sample.png"
+).read_bytes()
+
+
+def _sample_image_upload():
+    return io.BytesIO(_SAMPLE_IMAGE), "certificate.jpg"
 
 
 def _post_issue(client, details, cert_hash):
@@ -36,7 +45,7 @@ def _post_issue(client, details, cert_hash):
         "/issue",
         data={
             "csrf_token": token,
-            "certificate": (io.BytesIO(b"certificate"), "certificate.png"),
+            "certificate": _sample_image_upload(),
         },
         content_type="multipart/form-data",
     )
@@ -62,13 +71,13 @@ def test_api_issue_accepts_new_certificate_and_rejects_duplicate(
     with app.test_client() as client:
         first = client.post(
             "/api/issue",
-            data={"certificate": (io.BytesIO(b"certificate"), "certificate.png")},
+            data={"certificate": _sample_image_upload()},
             content_type="multipart/form-data",
             headers=admin_api_key_headers,
         )
         second = client.post(
             "/api/issue",
-            data={"certificate": (io.BytesIO(b"certificate"), "certificate.png")},
+            data={"certificate": _sample_image_upload()},
             content_type="multipart/form-data",
             headers=admin_api_key_headers,
         )

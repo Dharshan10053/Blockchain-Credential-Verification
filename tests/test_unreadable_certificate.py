@@ -17,6 +17,7 @@ import json
 import os
 import re
 import secrets
+from pathlib import Path
 
 os.environ.setdefault("FLASK_ENV", "development")
 os.environ.setdefault("SECRET_KEY", "test-secret-key-for-extraction-gate-tests")
@@ -55,6 +56,9 @@ NO_DETAILS_TEXT = (
     "remains pleasant and the afternoon passes quietly without any events "
     "of note occurring anywhere near the river."
 )
+_SAMPLE_IMAGE = (
+    Path(__file__).resolve().parents[1] / "test_images" / "sample.png"
+).read_bytes()
 
 
 @pytest.fixture
@@ -95,8 +99,8 @@ def client(tmp_path, monkeypatch):
         app_module.limiter.enabled = True
 
 
-def _upload(client, url, text, monkeypatch, filename="certificate.png"):
-    """POST a dummy file with perform_ocr stubbed to return `text`.
+def _upload(client, url, text, monkeypatch, filename="certificate.jpg"):
+    """POST a valid image with perform_ocr stubbed to return `text`.
 
     For /api/issue uses DB-backed X-Api-Key; for browser /issue relies on session.
     /verify routes are public and need no auth header.
@@ -109,7 +113,7 @@ def _upload(client, url, text, monkeypatch, filename="certificate.png"):
     # /issue (browser) relies on session cookie already set in the fixture
     return client.post(
         url,
-        data={"certificate": (io.BytesIO(b"dummy-image-bytes"), filename)},
+        data={"certificate": (io.BytesIO(_SAMPLE_IMAGE), filename)},
         content_type="multipart/form-data",
         headers=headers,
     )

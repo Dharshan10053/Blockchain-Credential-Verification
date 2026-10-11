@@ -3,6 +3,7 @@ test_security.py — Security regression tests for CERTAUTH.
 Tests: headers, auth, input validation, error handlers, rate limiting.
 """
 import os
+import subprocess
 import sys
 import hashlib
 import re
@@ -10,11 +11,14 @@ import secrets
 from urllib.parse import quote
 
 import pyotp
+import pytest
 
 # conftest.py handles env var setup before this runs
+import app as app_module
 from app import app, limiter
 from backend.database.db import (
     create_api_key,
+    create_auth_token,
     create_user,
     get_user_by_username,
     get_user_by_api_key_hash,
@@ -60,6 +64,102 @@ class TestSecurityHeaders:
         """X-XSS-Protection is deprecated and removed — should NOT be present."""
         r = self.client.get("/")
         assert "X-XSS-Protection" not in r.headers
+
+
+def _production_environment():
+    environment = os.environ.copy()
+    environment.update(
+        FLASK_ENV="production",
+        SECRET_KEY="s" * 64,
+        GEMINI_API_KEY="g" * 40,
+    )
+    return environment
+
+
+def test_password_policy_requires_minimum_and_caps_size():
+    assert app_module._password_is_acceptable("correct horse battery")
+    assert not app_module._password_is_acceptable("short")
+    assert not app_module._password_is_acceptable("x" * 1025)
+
+
+def test_weak_reset_password_does_not_consume_reset_token(monkeypatch):
+    monkeypatch.setitem(app.config, "WTF_CSRF_ENABLED", False)
+    init_db()
+    username = f"reset-policy-{secrets.token_hex(8)}"
+    assert create_user(
+        username,
+        generate_password_hash("existing secure password"),
+        "VERIFIER",
+    )
+    user = get_user_by_username(username)
+    token = secrets.token_urlsafe(32)
+    create_auth_token(
+        user["id"],
+        "password_reset",
+        token,
+        "2999-01-01T00:00:00+00:00",
+    )
+
+    client = app.test_client()
+    invalid = client.post(f"/reset-password/{token}", data={"password": "short"})
+    valid = client.post(
+        f"/reset-password/{token}",
+        data={"password": "correct horse battery"},
+    )
+
+    assert invalid.status_code == 400
+    assert valid.status_code == 302
+
+
+@pytest.mark.parametrize(
+    ("variable", "value", "message"),
+    [
+        (
+            "SECRET_KEY",
+            "your_strong_random_secret_key_here",
+            "SECRET_KEY must be a non-placeholder value",
+        ),
+        (
+            "GEMINI_API_KEY",
+            "placeholder_gemini_api_key_value",
+            "GEMINI_API_KEY must be a non-placeholder value",
+        ),
+    ],
+)
+def test_production_rejects_placeholder_secrets(variable, value, message):
+    environment = _production_environment()
+    environment[variable] = value
+
+    result = subprocess.run(
+        [sys.executable, "-c", "import app"],
+        cwd=os.path.dirname(os.path.dirname(__file__)),
+        env=environment,
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+
+    assert result.returncode != 0
+    assert message in result.stderr
+
+
+def test_legacy_backup_app_is_unavailable_outside_development():
+    result = subprocess.run(
+        [
+            sys.executable,
+            "-c",
+            "import app_backup; "
+            "print(app_backup.app.test_client().get('/').status_code)",
+        ],
+        cwd=os.path.dirname(os.path.dirname(__file__)),
+        env=_production_environment(),
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+
+    assert result.returncode == 0, result.stderr
+    assert result.stdout.rstrip().endswith("404")
 
 
 class TestInputValidation:
@@ -341,6 +441,20 @@ class TestReportAccess:
         r = self.client.get(f"/report/{mock_hash}?token={token}")
         # Only test auth layer
         assert r.status_code in [200, 500]
+
+    def test_token_lookup_does_not_echo_bearer_token_and_is_not_cached(self):
+        token = upsert_certificate(
+            "f" * 64,
+            {"name": "Token Holder", "certificate_title": "Token Certificate"},
+            action="ISSUE",
+        )
+
+        response = self.client.get(f"/verify_token/{token}")
+
+        assert response.status_code == 200
+        assert token not in response.get_data(as_text=True)
+        assert "verification_token" not in response.get_json()
+        assert response.headers["Cache-Control"] == "no-store"
 
 
 class TestErrorHandlers:

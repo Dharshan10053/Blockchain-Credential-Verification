@@ -185,6 +185,138 @@ a:hover { text-decoration: underline; }
 }
 .btn:active { transform: translateY(1px); }
 
+/* ── Portal Buttons ─────────────────────────────────────── */
+.portal-btn {
+  position: relative;
+  isolation: isolate;
+  overflow: hidden;
+  display: inline-flex;
+  align-items: center;
+  justify-content: flex-start;
+  gap: 14px;
+  min-width: 296px;
+  min-height: 82px;
+  padding: 16px 26px;
+  border: 1px solid transparent;
+  border-radius: 14px;
+  color: #f8fbff;
+  text-decoration: none;
+  box-shadow: 0 10px 26px rgba(2, 8, 23, 0.26), inset 0 1px 0 rgba(255, 255, 255, 0.08);
+  transition: box-shadow 220ms ease, transform 220ms ease, border-color 220ms ease;
+}
+
+.portal-btn::before {
+  content: "";
+  position: absolute;
+  inset: 0;
+  z-index: 0;
+  border-radius: inherit;
+  transform: scaleX(0);
+  transform-origin: left center;
+  pointer-events: none;
+  transition: transform 300ms cubic-bezier(0.22, 1, 0.36, 1);
+}
+
+.portal-btn:hover::before,
+.portal-btn:focus-visible::before {
+  transform: scaleX(1);
+}
+
+.portal-btn > * {
+  position: relative;
+  z-index: 1;
+}
+
+.portal-btn:focus-visible {
+  outline: 3px solid #67e8f9;
+  outline-offset: 4px;
+}
+
+.portal-btn.primary {
+  background: #2458c6;
+  border-color: rgba(147, 197, 253, 0.32);
+}
+
+.portal-btn.primary::before {
+  background: #153b91;
+}
+
+.portal-btn.primary .portal-subtitle {
+  color: rgba(241, 247, 255, 0.82);
+}
+
+.portal-btn.secondary {
+  background: #0b1427;
+  border-color: rgba(103, 190, 255, 0.52);
+}
+
+.portal-btn.secondary::before {
+  background: #1d55b8;
+}
+
+.portal-btn.secondary:hover .portal-subtitle,
+.portal-btn.secondary:focus-visible .portal-subtitle {
+  color: rgba(240, 249, 255, 0.9);
+}
+
+.portal-icon {
+  width: 25px;
+  height: 25px;
+  flex-shrink: 0;
+}
+
+.portal-text {
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
+  gap: 3px;
+  text-align: left;
+}
+
+.portal-title {
+  color: #f8fbff;
+  font-size: 15px;
+  font-weight: 600;
+  letter-spacing: -0.015em;
+  line-height: 1.25;
+}
+
+.portal-subtitle {
+  color: rgba(226, 234, 247, 0.72);
+  font-size: 12px;
+  font-weight: 400;
+  letter-spacing: 0.005em;
+  line-height: 1.35;
+}
+
+.portal-btn:hover {
+  text-decoration: none;
+  border-color: rgba(165, 218, 255, 0.72);
+  box-shadow: 0 14px 32px rgba(2, 8, 23, 0.34), 0 0 0 3px rgba(56, 153, 240, 0.12);
+  transform: translateY(-1px);
+}
+
+.portal-btn:active,
+.portal-btn:focus-visible {
+  transform: translateY(0);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .portal-btn,
+  .portal-btn::before {
+    transition: none;
+  }
+}
+
+@media (max-width: 640px) {
+  .portal-btn {
+    width: 100%;
+    max-width: 360px;
+    min-width: 0;
+  }
+}
+
+
 .btn-primary {
   background: var(--blue);
   color: white;

@@ -114,7 +114,9 @@ app.config.update(
     SESSION_COOKIE_SAMESITE='Lax',
     PERMANENT_SESSION_LIFETIME=timedelta(hours=24),
     AUTH_SESSION_INSTANCE=secrets.token_urlsafe(32),
-)
+    )
+app.config['SEND_FILE_MAX_AGE_DEFAULT'] = 0  # Disable caching of static files in dev
+app.config['STATIC_VERSION'] = 1  # Simple version for cache busting
 
 # ----------------------------------
 # UPLOAD LIMITS

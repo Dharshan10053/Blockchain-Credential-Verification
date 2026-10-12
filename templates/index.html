@@ -24,13 +24,27 @@
     </p>
 
     <div class="hero-actions fade-up fade-up-3">
-      <a href="{{ url_for('issue') }}" class="btn btn-primary btn-lg">
-        <svg width="16" height="16" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path d="M12 5v14M5 12h14" stroke-linecap="round"/></svg>
-        Issue Certificate
+      <a href="{{ url_for('issue') }}" class="portal-btn primary">
+        <svg class="portal-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+          <path d="M12 2l7 4v6c0 5-3 9-7 11-4-2-7-6-7-11V6l7-4z"/>
+          <polyline points="9 12 12 15 15 9"/>
+        </svg>
+        <div class="portal-text">
+          <div class="portal-title">Admin Portal</div>
+          <div class="portal-subtitle">Issue and manage certificates</div>
+        </div>
       </a>
-      <a href="{{ url_for('verify') }}" class="btn btn-secondary btn-lg">
-        <svg width="16" height="16" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path d="M9 12l2 2 4-4" stroke-linecap="round" stroke-linejoin="round"/><circle cx="12" cy="12" r="9" stroke-width="2"/></svg>
-        Verify Certificate
+      <a href="{{ url_for('verify') }}" class="portal-btn secondary">
+        <svg class="portal-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+          <path d="M4 4h12v16H4z"/>
+          <path d="M14 2v4h4"/>
+          <circle cx="9" cy="10" r="2"/>
+          <line x1="12" y1="13" x2="16" y2="17"/>
+        </svg>
+        <div class="portal-text">
+          <div class="portal-title">HR / Recruiter Portal</div>
+          <div class="portal-subtitle">Verify candidate certificates</div>
+        </div>
       </a>
     </div>
 

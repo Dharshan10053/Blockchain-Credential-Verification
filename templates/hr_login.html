@@ -1,0 +1,1068 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="color-scheme" content="dark">
+  <meta name="theme-color" content="#050a14">
+  <title>Recruiter Sign In — CertAuth</title>
+  <script>document.documentElement.classList.add("js");</script>
+  <style>
+    :root {
+      --bg: #050a14;
+      --panel: rgba(6, 12, 24, 0.80);
+      --line: rgba(148, 163, 184, 0.16);
+      --line-strong: rgba(148, 163, 184, 0.30);
+      --text: #f8fafc;
+      --soft: #cbd5e1;
+      --muted: #94a3b8;
+      --blue: #2563eb;
+      --cyan: #22d3ee;
+      --teal: #0891b2;
+      --danger: #fecaca;
+      --font: Inter, "SF Pro Text", -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
+    }
+
+    *, *::before, *::after { box-sizing: border-box; }
+    html { background: var(--bg); -webkit-text-size-adjust: 100%; }
+    body {
+      margin: 0;
+      min-height: 100vh;
+      min-height: 100dvh;
+      background:
+        radial-gradient(60% 55% at 12% 8%, rgba(37, 99, 235, 0.20), transparent 70%),
+        radial-gradient(50% 50% at 70% 85%, rgba(6, 182, 212, 0.12), transparent 70%),
+        var(--bg);
+      color: var(--text);
+      font-family: var(--font);
+      font-size: 15px;
+      line-height: 1.5;
+      -webkit-font-smoothing: antialiased;
+      overflow-x: hidden;
+    }
+    a { color: inherit; }
+    h1, h2, p { margin: 0; }
+
+    /* ── 3D scene ─────────────────────────────────────── */
+    #hr-scene {
+      position: fixed;
+      inset: 0;
+      width: 100%;
+      height: 100%;
+      display: block;
+      z-index: 0;
+      pointer-events: none;
+      opacity: 0;
+      transition: opacity 1.4s ease;
+    }
+    #hr-scene.is-ready { opacity: 1; }
+    .no-webgl #hr-scene { display: none; }
+
+    .veil {
+      position: fixed;
+      inset: 0;
+      z-index: 1;
+      pointer-events: none;
+      background:
+        radial-gradient(90% 70% at 18% 105%, rgba(5, 10, 20, 0.88), transparent 62%),
+        radial-gradient(70% 60% at 0% 0%, rgba(5, 10, 20, 0.55), transparent 65%),
+        linear-gradient(90deg, transparent 55%, rgba(5, 10, 20, 0.55) 100%);
+    }
+
+    /* ── Layout ───────────────────────────────────────── */
+    .skip {
+      position: absolute;
+      left: 16px;
+      top: -48px;
+      z-index: 10;
+      padding: 10px 14px;
+      border-radius: 8px;
+      background: #0f172a;
+      color: var(--text);
+      font-size: 13px;
+      text-decoration: none;
+      transition: top 160ms ease;
+    }
+    .skip:focus { top: 16px; outline: 2px solid var(--cyan); }
+
+    .shell {
+      position: relative;
+      z-index: 2;
+      min-height: 100vh;
+      min-height: 100dvh;
+      display: grid;
+      grid-template-columns: minmax(0, 1fr) minmax(420px, 30rem);
+    }
+
+    .stage {
+      position: relative;
+      display: flex;
+      flex-direction: column;
+      justify-content: space-between;
+      padding: clamp(28px, 4.2vw, 56px);
+      min-width: 0;
+    }
+
+    .brand {
+      display: inline-flex;
+      align-items: center;
+      gap: 12px;
+      width: fit-content;
+      text-decoration: none;
+    }
+    .brand-mark {
+      width: 36px;
+      height: 36px;
+      display: grid;
+      place-items: center;
+      border-radius: 10px;
+      background: linear-gradient(135deg, var(--teal), var(--blue));
+      box-shadow: 0 6px 20px rgba(37, 99, 235, 0.35), inset 0 1px 0 rgba(255, 255, 255, 0.22);
+    }
+    .brand-name { font-size: 16px; font-weight: 650; letter-spacing: -0.02em; }
+    .brand-chip {
+      margin-left: 2px;
+      padding: 3px 9px;
+      border: 1px solid var(--line-strong);
+      border-radius: 999px;
+      color: var(--soft);
+      font-size: 11px;
+      font-weight: 600;
+      letter-spacing: 0.06em;
+      text-transform: uppercase;
+      background: rgba(15, 23, 42, 0.5);
+    }
+    .brand:focus-visible, .back-link:focus-visible, .text-link:focus-visible {
+      outline: 2px solid var(--cyan);
+      outline-offset: 4px;
+      border-radius: 6px;
+    }
+
+    .stage-copy { max-width: 560px; padding-top: 48px; }
+    .eyebrow {
+      display: inline-flex;
+      align-items: center;
+      gap: 10px;
+      margin-bottom: 20px;
+      color: #7dd3fc;
+      font-size: 12px;
+      font-weight: 600;
+      letter-spacing: 0.12em;
+      text-transform: uppercase;
+    }
+    .eyebrow::before {
+      content: "";
+      width: 22px;
+      height: 1px;
+      background: linear-gradient(90deg, transparent, var(--cyan));
+    }
+    .stage-title {
+      font-size: clamp(2.2rem, 4.4vw, 3.7rem);
+      font-weight: 600;
+      line-height: 1.04;
+      letter-spacing: -0.045em;
+      text-wrap: balance;
+    }
+    .stage-title em {
+      font-style: normal;
+      background: linear-gradient(100deg, #7dd3fc 0%, var(--cyan) 45%, #60a5fa 100%);
+      -webkit-background-clip: text;
+      background-clip: text;
+      color: transparent;
+    }
+    .stage-lede {
+      margin-top: 20px;
+      max-width: 460px;
+      color: #a8b6ca;
+      font-size: 16px;
+      line-height: 1.7;
+    }
+    .stage-facts {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 6px 22px;
+      margin: 32px 0 0;
+      padding: 0;
+      list-style: none;
+      color: var(--muted);
+      font-size: 12.5px;
+      letter-spacing: 0.01em;
+    }
+    .stage-facts li { display: inline-flex; align-items: center; gap: 8px; }
+    .stage-facts li::before {
+      content: "";
+      width: 5px;
+      height: 5px;
+      border-radius: 1px;
+      transform: rotate(45deg);
+      background: var(--cyan);
+      box-shadow: 0 0 10px rgba(34, 211, 238, 0.7);
+    }
+
+    /* ── Docked sign-in panel ─────────────────────────── */
+    .dock {
+      position: relative;
+      display: flex;
+      flex-direction: column;
+      padding: clamp(24px, 3.2vw, 44px);
+      background: linear-gradient(180deg, rgba(8, 15, 29, 0.78), var(--panel));
+      -webkit-backdrop-filter: blur(22px) saturate(1.25);
+      backdrop-filter: blur(22px) saturate(1.25);
+      border-left: 1px solid var(--line);
+      box-shadow: -30px 0 80px rgba(0, 0, 0, 0.35);
+      overflow: hidden;
+    }
+    .dock::before {
+      content: "";
+      position: absolute;
+      left: -1px;
+      top: -40%;
+      width: 1px;
+      height: 40%;
+      background: linear-gradient(180deg, transparent, rgba(34, 211, 238, 0.85), transparent);
+      animation: dock-scan 8s cubic-bezier(.45, 0, .25, 1) infinite;
+      pointer-events: none;
+    }
+    @keyframes dock-scan { 0% { top: -40%; } 70%, 100% { top: 110%; } }
+
+    .dock-top {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 16px;
+      font-size: 12.5px;
+      color: var(--muted);
+    }
+    .dock-top .kicker {
+      display: inline-flex;
+      align-items: center;
+      gap: 8px;
+      color: #7dd3fc;
+      font-weight: 600;
+      letter-spacing: 0.1em;
+      text-transform: uppercase;
+      font-size: 11px;
+    }
+    .dock-top .kicker svg { flex: none; }
+    .text-link {
+      color: var(--soft);
+      text-decoration: none;
+      border-bottom: 1px solid transparent;
+      transition: color 160ms ease, border-color 160ms ease;
+    }
+    .text-link:hover { color: #fff; border-color: rgba(125, 211, 252, 0.6); }
+
+    .dock-body {
+      width: 100%;
+      max-width: 380px;
+      margin: auto;
+      padding: 40px 0;
+    }
+    .dock-body > * { animation: rise 640ms cubic-bezier(.2, .7, .2, 1) both; }
+    .dock-body > *:nth-child(2) { animation-delay: 60ms; }
+    .dock-body > *:nth-child(3) { animation-delay: 120ms; }
+    .dock-body > *:nth-child(4) { animation-delay: 180ms; }
+    .dock-body > *:nth-child(5) { animation-delay: 240ms; }
+    @keyframes rise { from { opacity: 0; transform: translateY(10px); } to { opacity: 1; transform: none; } }
+
+    h1.dock-title {
+      font-size: 28px;
+      font-weight: 600;
+      letter-spacing: -0.04em;
+      line-height: 1.15;
+    }
+    .dock-sub { margin: 10px 0 28px; color: var(--muted); font-size: 14.5px; }
+
+    .notice {
+      display: flex;
+      gap: 10px;
+      margin-bottom: 22px;
+      padding: 12px 14px;
+      border-radius: 10px;
+      font-size: 13.5px;
+      line-height: 1.5;
+    }
+    .notice svg { flex: none; margin-top: 2px; }
+    .notice-error { border: 1px solid rgba(248, 113, 113, 0.28); background: rgba(127, 29, 29, 0.20); color: var(--danger); }
+    .notice-info { border: 1px solid rgba(56, 189, 248, 0.28); background: rgba(8, 47, 73, 0.35); color: #bae6fd; }
+
+    .btn {
+      width: 100%;
+      min-height: 46px;
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      gap: 10px;
+      padding: 0 16px;
+      border-radius: 10px;
+      font: inherit;
+      font-size: 14.5px;
+      font-weight: 600;
+      text-decoration: none;
+      cursor: pointer;
+      transition: background 160ms ease, border-color 160ms ease, box-shadow 160ms ease, transform 160ms ease;
+    }
+    .btn:focus-visible { outline: 2px solid var(--cyan); outline-offset: 3px; }
+    .btn-google {
+      border: 1px solid var(--line-strong);
+      background: rgba(255, 255, 255, 0.04);
+      color: var(--text);
+    }
+    .btn-google:hover { background: rgba(255, 255, 255, 0.08); border-color: rgba(203, 213, 225, 0.5); }
+    .btn-primary {
+      position: relative;
+      margin-top: 8px;
+      border: 1px solid rgba(125, 211, 252, 0.34);
+      background: linear-gradient(105deg, var(--teal), var(--blue));
+      box-shadow: 0 10px 26px rgba(37, 99, 235, 0.28), inset 0 1px 0 rgba(255, 255, 255, 0.18);
+      color: #fff;
+    }
+    .btn-primary:hover { background: linear-gradient(105deg, #0e7490, #1d4ed8); transform: translateY(-1px); box-shadow: 0 14px 30px rgba(37, 99, 235, 0.36), inset 0 1px 0 rgba(255, 255, 255, 0.18); }
+    .btn-primary:active { transform: none; }
+    .btn-primary[disabled] { cursor: progress; opacity: 0.85; transform: none; }
+    .btn-primary .spinner {
+      display: none;
+      width: 16px;
+      height: 16px;
+      border: 2px solid rgba(255, 255, 255, 0.35);
+      border-top-color: #fff;
+      border-radius: 50%;
+      animation: spin 700ms linear infinite;
+    }
+    .btn-primary.is-loading .spinner { display: inline-block; }
+    @keyframes spin { to { transform: rotate(360deg); } }
+
+    .divider {
+      display: flex;
+      align-items: center;
+      gap: 14px;
+      margin: 22px 0;
+      color: var(--muted);
+      font-size: 12px;
+    }
+    .divider::before, .divider::after { content: ""; flex: 1; height: 1px; background: var(--line); }
+
+    .field { margin-bottom: 18px; }
+    .field-head { display: flex; align-items: baseline; justify-content: space-between; gap: 12px; margin-bottom: 8px; }
+    .field label { display: block; color: #dbe5f2; font-size: 13px; font-weight: 500; }
+    .field-head .text-link { font-size: 12.5px; color: #7dd3fc; }
+    .field-hint { margin-top: 7px; color: var(--muted); font-size: 12px; }
+    .field-error { margin-top: 7px; color: #fca5a5; font-size: 12.5px; }
+
+    .control { position: relative; }
+    .control input {
+      width: 100%;
+      min-height: 46px;
+      padding: 11px 14px;
+      border: 1px solid rgba(148, 163, 184, 0.22);
+      border-radius: 10px;
+      outline: none;
+      background: rgba(2, 6, 23, 0.55);
+      color: var(--text);
+      font: inherit;
+      font-size: 15px;
+      transition: border-color 160ms ease, box-shadow 160ms ease, background 160ms ease;
+    }
+    .control input::placeholder { color: #64748b; }
+    .control input:hover { border-color: rgba(148, 163, 184, 0.4); }
+    .control input:focus {
+      border-color: rgba(56, 189, 248, 0.8);
+      background: rgba(2, 6, 23, 0.8);
+      box-shadow: 0 0 0 3px rgba(14, 165, 233, 0.16);
+    }
+    .control.has-toggle input { padding-right: 48px; }
+    .pw-toggle {
+      position: absolute;
+      top: 50%;
+      right: 7px;
+      width: 34px;
+      height: 34px;
+      display: none;
+      place-items: center;
+      transform: translateY(-50%);
+      border: 0;
+      border-radius: 8px;
+      background: transparent;
+      color: var(--muted);
+      cursor: pointer;
+      transition: background 160ms ease, color 160ms ease;
+    }
+    .js .pw-toggle { display: grid; }
+    .pw-toggle:hover { background: rgba(148, 163, 184, 0.12); color: #e0f2fe; }
+    .pw-toggle:focus-visible { outline: 2px solid var(--cyan); outline-offset: 0; color: #e0f2fe; }
+    .pw-toggle .eye-off { display: none; }
+    .pw-toggle[aria-pressed="true"] .eye-on { display: none; }
+    .pw-toggle[aria-pressed="true"] .eye-off { display: block; }
+
+    .alt-row { margin-top: 22px; text-align: center; font-size: 13px; color: var(--muted); }
+    .alt-row .text-link { color: #7dd3fc; }
+
+    .dock-foot {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 16px;
+      flex-wrap: wrap;
+      color: #7c8aa0;
+      font-size: 12px;
+    }
+    .dock-foot span { display: inline-flex; align-items: center; gap: 7px; }
+    .back-link { color: var(--soft); text-decoration: none; }
+    .back-link:hover { color: #fff; }
+
+    /* ── Responsive ───────────────────────────────────── */
+    @media (max-width: 960px) {
+      .shell { grid-template-columns: minmax(0, 1fr); grid-template-rows: auto 1fr; }
+      .stage { padding: 22px 20px 6px; }
+      .stage-copy { display: none; }
+      .veil {
+        background:
+          radial-gradient(120% 60% at 50% 0%, rgba(5, 10, 20, 0.35), transparent 70%),
+          linear-gradient(180deg, transparent 20%, rgba(5, 10, 20, 0.7) 60%);
+      }
+      .dock {
+        margin: 10vh 14px 14px;
+        border: 1px solid var(--line);
+        border-radius: 20px;
+        box-shadow: 0 30px 80px rgba(0, 0, 0, 0.5);
+        padding: 22px;
+      }
+      .dock::before { display: none; }
+      .dock-body { padding: 30px 0; }
+    }
+    @media (max-width: 420px) {
+      .dock { margin: 6vh 10px 10px; padding: 18px; }
+      h1.dock-title { font-size: 25px; }
+      .dock-top .text-link { display: none; }
+    }
+    @media (max-height: 640px) and (min-width: 961px) { .stage-copy { padding-top: 24px; } .stage-lede { display: none; } }
+
+    @media (prefers-reduced-motion: reduce) {
+      *, *::before, *::after { animation: none !important; transition: none !important; }
+      .dock-body > * { opacity: 1; transform: none; }
+    }
+  </style>
+</head>
+<body>
+  <a class="skip" href="#main">Skip to sign in</a>
+
+  <canvas id="hr-scene" aria-hidden="true"></canvas>
+  <div class="veil" aria-hidden="true"></div>
+
+  {# ── Per-mode copy ─────────────────────────────────────────────── #}
+  {% if mode == 'forgot' %}
+    {% set heading = 'Reset your password' %}
+    {% set subheading = "Enter the email address on your account and we'll send you a reset link." %}
+    {% set submit_label = 'Send reset link' %}
+    {% set busy_label = 'Sending…' %}
+  {% elif mode == 'reset' %}
+    {% set heading = 'Choose a new password' %}
+    {% set subheading = 'Use at least 12 characters. You will sign in with it straight away.' %}
+    {% set submit_label = 'Update password' %}
+    {% set busy_label = 'Updating…' %}
+  {% elif mode == 'twofa' %}
+    {% set heading = 'Two-step verification' %}
+    {% set subheading = 'Enter the code from your authenticator app, or one of your recovery codes.' %}
+    {% set submit_label = 'Verify code' %}
+    {% set busy_label = 'Verifying…' %}
+  {% else %}
+    {% set heading = 'Welcome back' %}
+    {% set subheading = 'Sign in to verify candidate certificates.' %}
+    {% set submit_label = 'Sign in' %}
+    {% set busy_label = 'Signing in…' %}
+  {% endif %}
+
+  <div class="shell">
+    <section class="stage" aria-label="CertAuth recruiter portal">
+      <a class="brand" href="{{ url_for('home') }}" aria-label="CertAuth home">
+        <span class="brand-mark" aria-hidden="true">
+          <svg width="18" height="18" viewBox="0 0 16 16" fill="none">
+            <path d="M8 1L14 4.5V11.5L8 15L2 11.5V4.5L8 1Z" stroke="white" stroke-width="1.5" stroke-linejoin="round"/>
+            <circle cx="8" cy="8" r="2" fill="white"/>
+          </svg>
+        </span>
+        <span class="brand-name">CertAuth</span>
+        <span class="brand-chip">Recruiter</span>
+      </a>
+
+      <div class="stage-copy">
+        <div class="eyebrow">For HR &amp; talent teams</div>
+        <p class="stage-title">Hire on <em>verified</em> credentials.</p>
+        <p class="stage-lede">Check any candidate certificate against a tamper-proof SHA-256 ledger in seconds &mdash; before the offer goes out.</p>
+        <ul class="stage-facts">
+          <li>SHA-256 fingerprints</li>
+          <li>Blockchain ledger match</li>
+          <li>OCR with fuzzy matching</li>
+        </ul>
+      </div>
+    </section>
+
+    <main class="dock" id="main">
+      <div class="dock-top">
+        <span class="kicker">
+          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" aria-hidden="true"><path d="M12 3 20 7v5c0 4.7-3.2 7.7-8 9-4.8-1.3-8-4.3-8-9V7l8-4Z" stroke-linejoin="round"/><path d="m9 12 2 2 4-4" stroke-linecap="round" stroke-linejoin="round"/></svg>
+          Recruiter portal
+        </span>
+        <a class="text-link" href="{{ url_for('login') }}">Admin sign in &rarr;</a>
+      </div>
+
+      <div class="dock-body">
+        <div>
+          <h1 class="dock-title">{{ heading }}</h1>
+          <p class="dock-sub">{{ subheading }}</p>
+        </div>
+
+        <div aria-live="polite">
+          {% if message %}
+            <div class="notice notice-{{ message_kind }}" role="{{ 'alert' if message_kind == 'error' else 'status' }}">
+              <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" aria-hidden="true">
+                {% if message_kind == 'error' %}
+                  <circle cx="12" cy="12" r="9"/><path d="M12 7.5v5M12 16.2v.1" stroke-linecap="round"/>
+                {% else %}
+                  <circle cx="12" cy="12" r="9"/><path d="M12 11v5M12 7.8v.1" stroke-linecap="round"/>
+                {% endif %}
+              </svg>
+              <span>{{ message }}</span>
+            </div>
+          {% endif %}
+        </div>
+
+        <div>
+          {% if mode == 'signin' %}
+            {% if google_enabled %}
+              <a class="btn btn-google" href="{{ url_for('google_login', next=next_url) }}">
+                <svg width="18" height="18" viewBox="0 0 48 48" aria-hidden="true">
+                  <path fill="#EA4335" d="M24 9.5c3.5 0 6.6 1.2 9.1 3.6l6.8-6.8C35.9 2.4 30.4 0 24 0 14.6 0 6.5 5.4 2.6 13.2l7.9 6.1C12.4 13.6 17.7 9.5 24 9.5z"/>
+                  <path fill="#4285F4" d="M46.5 24.5c0-1.6-.1-3.1-.4-4.5H24v9h12.7c-.6 3-2.3 5.5-4.8 7.2l7.6 5.9c4.4-4.1 7-10.1 7-17.6z"/>
+                  <path fill="#FBBC05" d="M10.5 28.7a14.5 14.5 0 0 1 0-9.4l-7.9-6.1a24 24 0 0 0 0 21.6l7.9-6.1z"/>
+                  <path fill="#34A853" d="M24 48c6.5 0 11.9-2.1 15.9-5.8l-7.6-5.9c-2.1 1.4-4.9 2.3-8.3 2.3-6.3 0-11.6-4.1-13.5-9.8l-7.9 6.1C6.5 42.6 14.6 48 24 48z"/>
+                </svg>
+                Continue with Google
+              </a>
+              <div class="divider"><span>or sign in with email</span></div>
+            {% endif %}
+
+            <form method="post" action="{{ url_for('login', next=next_url, portal='hr') }}" data-busy="{{ busy_label }}">
+              <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+              <div class="field">
+                <div class="field-head"><label for="username">Email or username</label></div>
+                <div class="control">
+                  <input type="text" id="username" name="username" required maxlength="254" autocomplete="username" autocapitalize="none" autocorrect="off" spellcheck="false" placeholder="you@company.com">
+                </div>
+              </div>
+              <div class="field">
+                <div class="field-head">
+                  <label for="password">Password</label>
+                  <a class="text-link" href="{{ url_for('forgot_password', portal='hr') }}">Forgot password?</a>
+                </div>
+                <div class="control has-toggle">
+                  <input type="password" id="password" name="password" required maxlength="1024" autocomplete="current-password" placeholder="Enter your password">
+                  <button type="button" class="pw-toggle" aria-label="Show password" aria-pressed="false" aria-controls="password">
+                    <svg class="eye-on" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" aria-hidden="true"><path d="M2.5 12s3.4-6 9.5-6 9.5 6 9.5 6-3.4 6-9.5 6-9.5-6-9.5-6Z"/><circle cx="12" cy="12" r="2.5"/></svg>
+                    <svg class="eye-off" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" aria-hidden="true"><path d="M3 3l18 18M10.6 6.2A10.8 10.8 0 0 1 12 6c6.1 0 9.5 6 9.5 6a16.6 16.6 0 0 1-3.1 3.6M6.2 6.3C3.8 8 2.5 12 2.5 12s3.4 6 9.5 6c1 0 1.9-.2 2.7-.5"/><path d="M9.9 9.9a3 3 0 0 0 4.2 4.2"/></svg>
+                  </button>
+                </div>
+              </div>
+              <button type="submit" class="btn btn-primary"><span class="spinner" aria-hidden="true"></span><span class="label">{{ submit_label }}</span></button>
+            </form>
+
+          {% elif mode == 'forgot' %}
+            <form method="post" action="{{ url_for('forgot_password', portal='hr') }}" data-busy="{{ busy_label }}">
+              <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+              <div class="field">
+                <div class="field-head"><label for="email">Email address</label></div>
+                <div class="control">
+                  <input type="email" id="email" name="email" required maxlength="254" autocomplete="email" autocapitalize="none" spellcheck="false" placeholder="you@company.com">
+                </div>
+              </div>
+              <button type="submit" class="btn btn-primary"><span class="spinner" aria-hidden="true"></span><span class="label">{{ submit_label }}</span></button>
+            </form>
+            <p class="alt-row"><a class="text-link" href="{{ url_for('hr_login') }}">&larr; Back to sign in</a></p>
+
+          {% elif mode == 'reset' %}
+            <form method="post" action="{{ url_for('reset_password', token=token, portal='hr') }}" data-busy="{{ busy_label }}" data-confirm="new-password-confirm">
+              <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+              <div class="field">
+                <div class="field-head"><label for="new-password">New password</label></div>
+                <div class="control has-toggle">
+                  <input type="password" id="new-password" name="password" required minlength="12" maxlength="1024" autocomplete="new-password" placeholder="At least 12 characters">
+                  <button type="button" class="pw-toggle" aria-label="Show password" aria-pressed="false" aria-controls="new-password">
+                    <svg class="eye-on" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" aria-hidden="true"><path d="M2.5 12s3.4-6 9.5-6 9.5 6 9.5 6-3.4 6-9.5 6-9.5-6-9.5-6Z"/><circle cx="12" cy="12" r="2.5"/></svg>
+                    <svg class="eye-off" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" aria-hidden="true"><path d="M3 3l18 18M10.6 6.2A10.8 10.8 0 0 1 12 6c6.1 0 9.5 6 9.5 6a16.6 16.6 0 0 1-3.1 3.6M6.2 6.3C3.8 8 2.5 12 2.5 12s3.4 6 9.5 6c1 0 1.9-.2 2.7-.5"/><path d="M9.9 9.9a3 3 0 0 0 4.2 4.2"/></svg>
+                  </button>
+                </div>
+              </div>
+              <div class="field">
+                <div class="field-head"><label for="new-password-confirm">Confirm password</label></div>
+                <div class="control">
+                  <input type="password" id="new-password-confirm" required minlength="12" maxlength="1024" autocomplete="new-password" placeholder="Re-enter the password" aria-describedby="confirm-error">
+                </div>
+                <p class="field-error" id="confirm-error" role="alert" hidden>The two passwords don't match.</p>
+              </div>
+              <button type="submit" class="btn btn-primary"><span class="spinner" aria-hidden="true"></span><span class="label">{{ submit_label }}</span></button>
+            </form>
+            <p class="alt-row"><a class="text-link" href="{{ url_for('hr_login') }}">&larr; Back to sign in</a></p>
+
+          {% elif mode == 'twofa' %}
+            <form method="post" action="{{ url_for('two_factor_verify', next=next_url, portal='hr') }}" data-busy="{{ busy_label }}">
+              <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+              <div class="field">
+                <div class="field-head"><label for="code">Authentication or recovery code</label></div>
+                <div class="control">
+                  <input type="text" id="code" name="code" required maxlength="32" inputmode="text" autocomplete="one-time-code" autocapitalize="none" spellcheck="false" placeholder="123456">
+                </div>
+              </div>
+              <button type="submit" class="btn btn-primary"><span class="spinner" aria-hidden="true"></span><span class="label">{{ submit_label }}</span></button>
+            </form>
+            <p class="alt-row"><a class="text-link" href="{{ url_for('hr_login') }}">&larr; Use a different account</a></p>
+          {% endif %}
+        </div>
+      </div>
+
+      <div class="dock-foot">
+        <span>
+          <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" aria-hidden="true"><rect x="4" y="10" width="16" height="11" rx="2"/><path d="M8 10V7a4 4 0 0 1 8 0v3"/></svg>
+          Secure session &middot; CSRF protected
+        </span>
+        <a class="back-link" href="{{ url_for('home') }}">&larr; Back to CertAuth</a>
+      </div>
+    </main>
+  </div>
+
+  <script>
+  /* ── Form behaviour: password visibility, confirm check, busy state ── */
+  (function () {
+    var toggles = document.querySelectorAll(".pw-toggle");
+    Array.prototype.forEach.call(toggles, function (btn) {
+      var input = document.getElementById(btn.getAttribute("aria-controls"));
+      if (!input) return;
+      btn.addEventListener("click", function () {
+        var show = input.type === "password";
+        input.type = show ? "text" : "password";
+        btn.setAttribute("aria-pressed", String(show));
+        btn.setAttribute("aria-label", show ? "Hide password" : "Show password");
+      });
+    });
+
+    var forms = document.querySelectorAll("form[data-busy]");
+    Array.prototype.forEach.call(forms, function (form) {
+      var submit = form.querySelector(".btn-primary");
+      var label = submit && submit.querySelector(".label");
+      var idleText = label ? label.textContent : "";
+      var sent = false;
+
+      form.addEventListener("submit", function (event) {
+        var confirmId = form.getAttribute("data-confirm");
+        if (confirmId) {
+          var first = form.querySelector('input[name="password"]');
+          var second = document.getElementById(confirmId);
+          var error = document.getElementById("confirm-error");
+          if (first && second && first.value !== second.value) {
+            event.preventDefault();
+            if (error) error.hidden = false;
+            second.focus();
+            return;
+          }
+          if (error) error.hidden = true;
+        }
+        if (sent) { event.preventDefault(); return; }
+        sent = true;
+        if (submit) {
+          submit.classList.add("is-loading");
+          submit.setAttribute("aria-busy", "true");
+          if (label) label.textContent = form.getAttribute("data-busy");
+          window.setTimeout(function () { submit.disabled = true; }, 0);
+        }
+      });
+
+      window.addEventListener("pageshow", function (event) {
+        if (!event.persisted) return;
+        sent = false;
+        if (submit) {
+          submit.disabled = false;
+          submit.classList.remove("is-loading");
+          submit.removeAttribute("aria-busy");
+          if (label) label.textContent = idleText;
+        }
+      });
+    });
+
+    var first = document.querySelector(".dock-body input:not([type=hidden])");
+    if (first && window.matchMedia("(pointer: fine)").matches && !document.querySelector(".notice-error")) {
+      first.focus({ preventScroll: true });
+    }
+  })();
+
+  /* ── "Ledger atrium": a chain of glass blocks drifting through depth ──
+     Raw WebGL, no libraries. Pointer steers the camera and carries a soft
+     light; a periodic verification sweep brightens blocks as it passes. */
+  (function () {
+    var canvas = document.getElementById("hr-scene");
+    if (!canvas) return;
+    var root = document.documentElement;
+    var gl = null;
+    try {
+      gl = canvas.getContext("webgl", { antialias: true, alpha: false, powerPreference: "low-power" }) ||
+           canvas.getContext("experimental-webgl");
+    } catch (e) { gl = null; }
+    if (!gl) { root.classList.add("no-webgl"); return; }
+
+    var reduce = window.matchMedia("(prefers-reduced-motion: reduce)");
+    var N = 17, SPACING = 3.4, LENGTH = N * SPACING, Z_NEAR = 4.2, SPEED = 0.34, SWEEP_PERIOD = 10;
+    var GRID_Y = -3.3, GRID_STEP = 2.0;
+
+    var VS_FACE = [
+      "attribute vec3 aPos; attribute vec3 aNormal;",
+      "uniform mat4 uProj, uView, uModel; uniform mat3 uNormalMat;",
+      "varying vec3 vN; varying vec3 vW;",
+      "void main(){ vec4 w = uModel * vec4(aPos, 1.0); vW = w.xyz; vN = uNormalMat * aNormal; gl_Position = uProj * uView * w; }"
+    ].join("\n");
+
+    var PRECISION = "#ifdef GL_FRAGMENT_PRECISION_HIGH\nprecision highp float;\n#else\nprecision mediump float;\n#endif\n";
+
+    var FS_FACE = PRECISION + [
+      "uniform vec3 uEye, uLight; uniform float uFade, uSweep;",
+      "varying vec3 vN; varying vec3 vW;",
+      "void main(){",
+      "  vec3 n = normalize(vN); vec3 v = normalize(uEye - vW);",
+      "  float fres = pow(1.0 - abs(dot(n, v)), 2.2);",
+      "  float d = distance(vW, uLight);",
+      "  float lit = 1.0 / (1.0 + d * d * 0.10);",
+      "  float sw = exp(-pow((vW.z - uSweep) / 1.7, 2.0));",
+      "  float fog = exp(-distance(vW, uEye) * 0.036);",
+      "  vec3 blue = vec3(0.145, 0.388, 0.922); vec3 cyan = vec3(0.133, 0.827, 0.933);",
+      "  vec3 col = mix(blue, cyan, clamp(fres * 1.1 + sw * 0.7 + lit * 0.4, 0.0, 1.0));",
+      "  float a = (0.030 + 0.30 * fres + 0.24 * lit * (0.35 + fres) + 0.26 * sw) * fog * uFade;",
+      "  gl_FragColor = vec4(col, a);",
+      "}"
+    ].join("\n");
+
+    var VS_LINE = [
+      "attribute vec3 aPos;",
+      "uniform mat4 uProj, uView, uModel; varying vec3 vW;",
+      "void main(){ vec4 w = uModel * vec4(aPos, 1.0); vW = w.xyz; gl_Position = uProj * uView * w; }"
+    ].join("\n");
+
+    var FS_LINE = PRECISION + [
+      "uniform vec3 uEye, uLight, uTint; uniform float uFade, uSweep, uBase, uFogK;",
+      "varying vec3 vW;",
+      "void main(){",
+      "  float d = distance(vW, uLight);",
+      "  float lit = 1.0 / (1.0 + d * d * 0.10);",
+      "  float sw = exp(-pow((vW.z - uSweep) / 1.7, 2.0));",
+      "  float fog = exp(-distance(vW, uEye) * uFogK);",
+      "  float a = (uBase + 0.50 * lit + 0.55 * sw) * fog * uFade;",
+      "  vec3 col = mix(uTint, vec3(0.62, 0.93, 1.0), clamp(sw * 0.8 + lit * 0.35, 0.0, 1.0));",
+      "  gl_FragColor = vec4(col, a);",
+      "}"
+    ].join("\n");
+
+    function compile(type, src) {
+      var sh = gl.createShader(type);
+      gl.shaderSource(sh, src); gl.compileShader(sh);
+      if (!gl.getShaderParameter(sh, gl.COMPILE_STATUS)) throw new Error(gl.getShaderInfoLog(sh));
+      return sh;
+    }
+    function program(vs, fs, attribs) {
+      var p = gl.createProgram();
+      gl.attachShader(p, compile(gl.VERTEX_SHADER, vs));
+      gl.attachShader(p, compile(gl.FRAGMENT_SHADER, fs));
+      attribs.forEach(function (name, i) { gl.bindAttribLocation(p, i, name); });
+      gl.linkProgram(p);
+      if (!gl.getProgramParameter(p, gl.LINK_STATUS)) throw new Error(gl.getProgramInfoLog(p));
+      var u = {};
+      var count = gl.getProgramParameter(p, gl.ACTIVE_UNIFORMS);
+      for (var i = 0; i < count; i++) {
+        var info = gl.getActiveUniform(p, i);
+        u[info.name] = gl.getUniformLocation(p, info.name);
+      }
+      return { p: p, u: u };
+    }
+
+    var face, line, cubeFaceBuf, cubeFaceIdx, cubeEdgeBuf, cubeEdgeIdx, gridBuf, gridCount, linkBuf;
+    var linkData = new Float32Array((N - 1) * 6);
+
+    function buildGeometry() {
+      var h = 0.5;
+      var faces = [
+        [[ h,-h,-h],[ h, h,-h],[ h, h, h],[ h,-h, h],[ 1,0,0]],
+        [[-h,-h, h],[-h, h, h],[-h, h,-h],[-h,-h,-h],[-1,0,0]],
+        [[-h, h,-h],[-h, h, h],[ h, h, h],[ h, h,-h],[0,1,0]],
+        [[-h,-h, h],[-h,-h,-h],[ h,-h,-h],[ h,-h, h],[0,-1,0]],
+        [[-h,-h, h],[ h,-h, h],[ h, h, h],[-h, h, h],[0,0,1]],
+        [[ h,-h,-h],[-h,-h,-h],[-h, h,-h],[ h, h,-h],[0,0,-1]]
+      ];
+      var fv = [], fi = [];
+      faces.forEach(function (f, k) {
+        for (var i = 0; i < 4; i++) fv.push(f[i][0], f[i][1], f[i][2], f[4][0], f[4][1], f[4][2]);
+        var o = k * 4; fi.push(o, o + 1, o + 2, o, o + 2, o + 3);
+      });
+      cubeFaceBuf = gl.createBuffer();
+      gl.bindBuffer(gl.ARRAY_BUFFER, cubeFaceBuf);
+      gl.bufferData(gl.ARRAY_BUFFER, new Float32Array(fv), gl.STATIC_DRAW);
+      cubeFaceIdx = gl.createBuffer();
+      gl.bindBuffer(gl.ELEMENT_ARRAY_BUFFER, cubeFaceIdx);
+      gl.bufferData(gl.ELEMENT_ARRAY_BUFFER, new Uint16Array(fi), gl.STATIC_DRAW);
+
+      var ev = [-h,-h,-h, h,-h,-h, h,h,-h, -h,h,-h, -h,-h,h, h,-h,h, h,h,h, -h,h,h];
+      var ei = [0,1, 1,2, 2,3, 3,0, 4,5, 5,6, 6,7, 7,4, 0,4, 1,5, 2,6, 3,7];
+      cubeEdgeBuf = gl.createBuffer();
+      gl.bindBuffer(gl.ARRAY_BUFFER, cubeEdgeBuf);
+      gl.bufferData(gl.ARRAY_BUFFER, new Float32Array(ev), gl.STATIC_DRAW);
+      cubeEdgeIdx = gl.createBuffer();
+      gl.bindBuffer(gl.ELEMENT_ARRAY_BUFFER, cubeEdgeIdx);
+      gl.bufferData(gl.ELEMENT_ARRAY_BUFFER, new Uint16Array(ei), gl.STATIC_DRAW);
+
+      // Floor grid: lines along z (fixed) and along x (scrolled in the model matrix).
+      var gv = [], xs = 22, zMin = -64, zMax = 12;
+      for (var x = -xs; x <= xs; x += GRID_STEP) gv.push(x, GRID_Y, zMin, x, GRID_Y, zMax);
+      for (var z = zMin; z <= zMax + GRID_STEP; z += GRID_STEP) gv.push(-xs, GRID_Y, z, xs, GRID_Y, z);
+      gridCount = gv.length / 3;
+      gridBuf = gl.createBuffer();
+      gl.bindBuffer(gl.ARRAY_BUFFER, gridBuf);
+      gl.bufferData(gl.ARRAY_BUFFER, new Float32Array(gv), gl.STATIC_DRAW);
+
+      linkBuf = gl.createBuffer();
+      gl.bindBuffer(gl.ARRAY_BUFFER, linkBuf);
+      gl.bufferData(gl.ARRAY_BUFFER, linkData.byteLength, gl.DYNAMIC_DRAW);
+    }
+
+    function setup() {
+      face = program(VS_FACE, FS_FACE, ["aPos", "aNormal"]);
+      line = program(VS_LINE, FS_LINE, ["aPos"]);
+      buildGeometry();
+      gl.disable(gl.DEPTH_TEST);
+      gl.disable(gl.CULL_FACE);
+      gl.enable(gl.BLEND);
+      gl.blendFunc(gl.SRC_ALPHA, gl.ONE);
+      gl.clearColor(5 / 255, 10 / 255, 20 / 255, 1);
+    }
+
+    /* ── Math (column-major) ── */
+    function perspective(fovy, aspect, near, far) {
+      var f = 1 / Math.tan(fovy / 2), nf = 1 / (near - far);
+      return new Float32Array([f / aspect, 0, 0, 0, 0, f, 0, 0, 0, 0, (far + near) * nf, -1, 0, 0, 2 * far * near * nf, 0]);
+    }
+    function lookAt(e, c) {
+      var zx = e[0] - c[0], zy = e[1] - c[1], zz = e[2] - c[2];
+      var zl = Math.hypot(zx, zy, zz); zx /= zl; zy /= zl; zz /= zl;
+      var xx = zz, xy = 0, xz = -zx;               // up = (0,1,0) x z
+      var xl = Math.hypot(xx, xy, xz); xx /= xl; xy /= xl; xz /= xl;
+      var yx = zy * xz - zz * xy, yy = zz * xx - zx * xz, yz = zx * xy - zy * xx;
+      return new Float32Array([
+        xx, yx, zx, 0, xy, yy, zy, 0, xz, yz, zz, 0,
+        -(xx * e[0] + xy * e[1] + xz * e[2]), -(yx * e[0] + yy * e[1] + yz * e[2]), -(zx * e[0] + zy * e[1] + zz * e[2]), 1
+      ]);
+    }
+    var model = new Float32Array(16), normalMat = new Float32Array(9);
+    function compose(px, py, pz, rx, ry, s) {
+      var cx = Math.cos(rx), sx = Math.sin(rx), cy = Math.cos(ry), sy = Math.sin(ry);
+      model[0] = cy * s;        model[1] = 0;       model[2] = -sy * s;       model[3] = 0;
+      model[4] = sy * sx * s;   model[5] = cx * s;  model[6] = cy * sx * s;   model[7] = 0;
+      model[8] = sy * cx * s;   model[9] = -sx * s; model[10] = cy * cx * s;  model[11] = 0;
+      model[12] = px; model[13] = py; model[14] = pz; model[15] = 1;
+      normalMat[0] = cy;      normalMat[1] = 0;   normalMat[2] = -sy;
+      normalMat[3] = sy * sx; normalMat[4] = cx;  normalMat[5] = cy * sx;
+      normalMat[6] = sy * cx; normalMat[7] = -sx; normalMat[8] = cy * cx;
+    }
+    var IDENTITY = new Float32Array([1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1]);
+    function smooth(a, b, x) { var t = Math.min(1, Math.max(0, (x - a) / (b - a))); return t * t * (3 - 2 * t); }
+    function pathX(z, spread) { return (-0.6 + 3.4 * Math.sin(z * 0.13 + 0.5) + 1.2 * Math.sin(z * 0.29)) * spread; }
+    function pathY(z) { return 1.3 * Math.sin(z * 0.19 + 1.0) - 0.1; }
+    function hash(k) { var x = Math.sin(k * 127.1 + 311.7) * 43758.5453; return x - Math.floor(x); }
+
+    /* ── State ── */
+    var width = 1, height = 1, aspect = 1, dpr = 1;
+    var pointer = { x: 0, y: 0, active: false, lastMove: 0 };
+    var cam = { x: 0, y: 0 }, light = { x: 0, y: 0 };
+    var proj = null, rafId = 0, t0 = 0, simTime = 0, lastNow = 0, running = false;
+    var eye = [0, 0, 0], zs = new Float32Array(N), fades = new Float32Array(N);
+
+    function resize() {
+      var w = window.innerWidth, h = window.innerHeight;
+      dpr = Math.min(window.devicePixelRatio || 1, w < 700 ? 1.5 : 1.75);
+      width = Math.max(1, Math.floor(w * dpr)); height = Math.max(1, Math.floor(h * dpr));
+      canvas.width = width; canvas.height = height;
+      gl.viewport(0, 0, width, height);
+      aspect = w / h;
+      proj = perspective(aspect < 1 ? 1.05 : 0.86, aspect, 0.1, 90);
+      proj[8] = aspect > 1.3 ? 0.30 : 0;   // vanishing point sits in the free area left of the sign-in panel
+      if (!running) frame(reduce.matches ? 7 : simTime);
+    }
+
+    function bindPos(buf, stride) {
+      gl.bindBuffer(gl.ARRAY_BUFFER, buf);
+      gl.enableVertexAttribArray(0);
+      gl.vertexAttribPointer(0, 3, gl.FLOAT, false, stride, 0);
+    }
+
+    function frame(t) {
+      var animate = !reduce.matches;
+      if (animate) {
+        var idle = (performance.now() - pointer.lastMove) > 3500;
+        var tx = pointer.active && !idle ? pointer.x : Math.sin(t * 0.17) * 0.45;
+        var ty = pointer.active && !idle ? pointer.y : Math.cos(t * 0.13) * 0.25;
+        cam.x += (tx - cam.x) * 0.045; cam.y += (ty - cam.y) * 0.045;
+        light.x += (tx - light.x) * 0.06;
+        light.y += (ty - light.y) * 0.06;
+      } else { cam.x = 0.18; cam.y = 0.05; light.x = -0.2; light.y = 0.1; }
+
+      var spread = Math.min(1, Math.max(0.12, aspect / 1.6));
+      eye[0] = cam.x * 0.9; eye[1] = 1.0 + cam.y * 0.5; eye[2] = 7.4;
+      var view = lookAt(eye, [-cam.x * 0.7, -1.0, -12]);
+      var lightPos = [light.x * 8 - 1.5 * spread, light.y * 2.8 + 0.2, -2.5];
+      var sweep = -50 + 56 * ((t % SWEEP_PERIOD) / SWEEP_PERIOD);
+
+      gl.clear(gl.COLOR_BUFFER_BIT);
+
+      // Floor grid
+      gl.useProgram(line.p);
+      gl.uniformMatrix4fv(line.u.uProj, false, proj);
+      gl.uniformMatrix4fv(line.u.uView, false, view);
+      gl.uniform3fv(line.u.uEye, eye);
+      gl.uniform3fv(line.u.uLight, lightPos);
+      gl.uniform1f(line.u.uSweep, sweep);
+      gl.uniform1f(line.u.uFade, 1);
+      var scroll = (t * SPEED) % GRID_STEP;
+      compose(0, 0, scroll, 0, 0, 1);
+      gl.uniformMatrix4fv(line.u.uModel, false, model);
+      gl.uniform3f(line.u.uTint, 0.12, 0.42, 0.85);
+      gl.uniform1f(line.u.uBase, 0.17);
+      gl.uniform1f(line.u.uFogK, 0.040);
+      bindPos(gridBuf, 12);
+      gl.drawArrays(gl.LINES, 0, gridCount);
+
+      // Cube positions, fade and chain links
+      for (var k = 0; k < N; k++) {
+        var m = (k * SPACING + t * SPEED) % LENGTH;
+        zs[k] = Z_NEAR - LENGTH + m;
+      }
+      var linkCount = 0;
+      for (k = 0; k < N - 1; k++) {
+        var za = zs[k], zb = zs[k + 1];
+        if (zb - za > 0.5 * SPACING && zb - za < 1.5 * SPACING) {
+          var o = linkCount * 6;
+          linkData[o] = pathX(za, spread); linkData[o + 1] = pathY(za); linkData[o + 2] = za;
+          linkData[o + 3] = pathX(zb, spread); linkData[o + 4] = pathY(zb); linkData[o + 5] = zb;
+          linkCount++;
+        }
+      }
+      // wrap-around neighbour (last -> first)
+      var zl = zs[N - 1], zf = zs[0];
+      if (zf - zl > 0.5 * SPACING && zf - zl < 1.5 * SPACING) {
+        var o2 = linkCount * 6;
+        linkData[o2] = pathX(zl, spread); linkData[o2 + 1] = pathY(zl); linkData[o2 + 2] = zl;
+        linkData[o2 + 3] = pathX(zf, spread); linkData[o2 + 4] = pathY(zf); linkData[o2 + 5] = zf;
+        linkCount++;
+      }
+      if (linkCount) {
+        // Chain links
+        gl.uniformMatrix4fv(line.u.uModel, false, IDENTITY);
+        gl.uniform3f(line.u.uTint, 0.2, 0.62, 0.95);
+        gl.uniform1f(line.u.uBase, 0.20);
+        gl.uniform1f(line.u.uFogK, 0.045);
+        gl.bindBuffer(gl.ARRAY_BUFFER, linkBuf);
+        gl.bufferSubData(gl.ARRAY_BUFFER, 0, linkData.subarray(0, linkCount * 6));
+        gl.enableVertexAttribArray(0);
+        gl.vertexAttribPointer(0, 3, gl.FLOAT, false, 12, 0);
+        gl.drawArrays(gl.LINES, 0, linkCount * 2);
+      }
+
+      // Block edges + inner cores (line program)
+      gl.uniform3f(line.u.uTint, 0.15, 0.55, 0.95);
+      gl.uniform1f(line.u.uBase, 0.38);
+      gl.uniform1f(line.u.uFogK, 0.036);
+      bindPos(cubeEdgeBuf, 12);
+      gl.bindBuffer(gl.ELEMENT_ARRAY_BUFFER, cubeEdgeIdx);
+      for (k = 0; k < N; k++) {
+        var z = zs[k];
+        var fade = smooth(-50, -36, z) * (1 - smooth(-0.5, 3.4, z));
+        fades[k] = fade;
+        if (fade <= 0.002) continue;
+        var seed = hash(k), seed2 = hash(k + 17.3);
+        var s = 0.75 + 0.5 * seed;
+        var rx = t * (0.07 + 0.08 * seed) + k * 0.9, ry = t * (0.10 + 0.10 * seed2) + k * 1.3;
+        gl.uniform1f(line.u.uFade, fade);
+        compose(pathX(z, spread), pathY(z), z, rx, ry, s);
+        gl.uniformMatrix4fv(line.u.uModel, false, model);
+        gl.drawElements(gl.LINES, 24, gl.UNSIGNED_SHORT, 0);
+        gl.uniform3f(line.u.uTint, 0.30, 0.85, 0.95);
+        compose(pathX(z, spread), pathY(z), z, -rx * 1.4, -ry * 1.2, s * 0.40);
+        gl.uniformMatrix4fv(line.u.uModel, false, model);
+        gl.drawElements(gl.LINES, 24, gl.UNSIGNED_SHORT, 0);
+        gl.uniform3f(line.u.uTint, 0.15, 0.55, 0.95);
+      }
+
+      // Glass faces
+      gl.useProgram(face.p);
+      gl.uniformMatrix4fv(face.u.uProj, false, proj);
+      gl.uniformMatrix4fv(face.u.uView, false, view);
+      gl.uniform3fv(face.u.uEye, eye);
+      gl.uniform3fv(face.u.uLight, lightPos);
+      gl.uniform1f(face.u.uSweep, sweep);
+      gl.bindBuffer(gl.ARRAY_BUFFER, cubeFaceBuf);
+      gl.enableVertexAttribArray(0);
+      gl.vertexAttribPointer(0, 3, gl.FLOAT, false, 24, 0);
+      gl.enableVertexAttribArray(1);
+      gl.vertexAttribPointer(1, 3, gl.FLOAT, false, 24, 12);
+      gl.bindBuffer(gl.ELEMENT_ARRAY_BUFFER, cubeFaceIdx);
+      for (k = 0; k < N; k++) {
+        if (fades[k] <= 0.002) continue;
+        var zz = zs[k], sd = hash(k), sd2 = hash(k + 17.3);
+        var rx2 = t * (0.07 + 0.08 * sd) + k * 0.9, ry2 = t * (0.10 + 0.10 * sd2) + k * 1.3;
+        compose(pathX(zz, spread), pathY(zz), zz, rx2, ry2, 0.75 + 0.5 * sd);
+        gl.uniformMatrix4fv(face.u.uModel, false, model);
+        gl.uniformMatrix3fv(face.u.uNormalMat, false, normalMat);
+        gl.uniform1f(face.u.uFade, fades[k]);
+        gl.drawElements(gl.TRIANGLES, 36, gl.UNSIGNED_SHORT, 0);
+      }
+      gl.disableVertexAttribArray(1);
+    }
+
+    function loop(now) {
+      if (!running) return;
+      var dt = Math.min((now - (lastNow || now)) / 1000, 0.05);
+      lastNow = now;
+      simTime += dt;
+      frame(simTime);
+      rafId = requestAnimationFrame(loop);
+    }
+    function start() {
+      if (running || reduce.matches || document.hidden) return;
+      running = true; lastNow = 0;
+      rafId = requestAnimationFrame(loop);
+    }
+    function stop() {
+      running = false;
+      if (rafId) cancelAnimationFrame(rafId);
+      rafId = 0;
+    }
+    function settle() {
+      stop();
+      if (reduce.matches) frame(7); else start();
+    }
+
+    try { setup(); } catch (err) { root.classList.add("no-webgl"); return; }
+    resize();
+    frame(reduce.matches ? 7 : 0);
+    canvas.classList.add("is-ready");
+    settle();
+
+    window.addEventListener("resize", resize, { passive: true });
+    window.addEventListener("pointermove", function (e) {
+      if (e.pointerType === "touch") return;
+      pointer.x = (e.clientX / window.innerWidth) * 2 - 1;
+      pointer.y = -((e.clientY / window.innerHeight) * 2 - 1);
+      pointer.active = true; pointer.lastMove = performance.now();
+    }, { passive: true });
+    document.addEventListener("pointerleave", function () { pointer.active = false; });
+    document.addEventListener("visibilitychange", function () { if (document.hidden) stop(); else settle(); });
+    if (reduce.addEventListener) reduce.addEventListener("change", settle);
+    canvas.addEventListener("webglcontextlost", function (e) { e.preventDefault(); stop(); root.classList.add("no-webgl"); });
+    canvas.addEventListener("webglcontextrestored", function () {
+      try { setup(); root.classList.remove("no-webgl"); resize(); settle(); } catch (err) { /* stay on CSS fallback */ }
+    });
+  })();
+  </script>
+</body>
+</html>

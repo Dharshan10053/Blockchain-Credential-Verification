@@ -27,7 +27,7 @@ from backend.database import db as database
 _TEST_DB_DIRECTORY = tempfile.TemporaryDirectory(prefix="certauth-tests-")
 database._DB_PATH = os.path.join(_TEST_DB_DIRECTORY.name, "certificates.db")
 
-from app import app as flask_app
+from app import app as flask_app, limiter
 from backend.database.db import create_api_key, create_user, init_db
 
 
@@ -56,6 +56,18 @@ def _create_admin_api_key(username="admin_test", password="password"):
 # ---------------------------------------------------------------------------
 # Fixtures
 # ---------------------------------------------------------------------------
+
+@pytest.fixture(autouse=True)
+def reset_rate_limit_storage():
+    """Keep in-memory limiter counters isolated between tests.
+
+    Flask-Limiter's public reset() API clears storage without disabling any
+    configured limits, so tests that exercise rate limiting still use the real
+    production configuration.
+    """
+    limiter.reset()
+    yield
+    limiter.reset()
 
 @pytest.fixture
 def admin_client():

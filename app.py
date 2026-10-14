@@ -35,6 +35,7 @@ from backend.utils.extraction_quality import (
 from backend.utils.verification_confidence import calculate_verification_confidence
 from backend.utils.report_generator import generate_report
 from backend.utils.auth import login_required, require_role, get_current_user
+from backend.utils import google_oauth
 from datetime import timedelta
 import werkzeug.security
 import pyotp
@@ -1272,6 +1273,51 @@ def verify_certificate(cert_hash):
 def home():
     return render_template("index.html")
 
+# ----------------------------------
+# HR / RECRUITER PORTAL
+# ----------------------------------
+def _is_hr_portal() -> bool:
+    return (request.values.get("portal") or "").lower() == "hr"
+
+
+def _portal_args() -> dict:
+    return {"portal": "hr"} if _is_hr_portal() else {}
+
+
+def _safe_local_next(next_url):
+    if not next_url or re.search(r"[\x00-\x1f\\]", next_url):
+        return None
+    parsed = urlsplit(next_url)
+    if parsed.scheme or parsed.netloc:
+        if parsed.scheme != request.scheme or parsed.netloc != request.host:
+            return None
+        next_url = urlunsplit(("", "", parsed.path or "/", parsed.query, parsed.fragment))
+    if not next_url.startswith("/") or next_url.startswith("//"):
+        return None
+    return next_url
+
+
+def _render_hr_login(message=None, status=200, mode="signin", notice=False, **context):
+    context.setdefault(
+        "next_url",
+        _safe_local_next(request.args.get("next", "")) or url_for("verify"),
+    )
+    return render_template(
+        "hr_login.html",
+        message=message,
+        message_kind="info" if notice else "error",
+        mode=mode,
+        google_enabled=google_oauth.is_configured(),
+        **context,
+    ), status
+
+
+def _render_auth(message=None, status=200, mode="signin", notice=False, **context):
+    if _is_hr_portal():
+        return _render_hr_login(message, status, mode, notice, **context)
+    return render_template("login.html", error=message), status
+
+
 @app.route("/login", methods=["GET", "POST"])
 @limiter.limit("5 per minute", methods=["POST"])
 def login():
@@ -1285,15 +1331,27 @@ def login():
             if len(username) <= 64 and len(password) <= 1024
             else None
         )
+        if (
+            user is None
+            and _is_hr_portal()
+            and "@" in username
+            and len(username) <= 254
+            and len(password) <= 1024
+        ):
+            user = get_user_by_email(username.lower())
         
         if user and user["is_active"] and werkzeug.security.check_password_hash(user["password_hash"], password):
             if user.get("email") and not user.get("email_verified"):
-                return render_template("login.html", error="Please verify your email before signing in."), 403
+                return _render_auth("Please verify your email before signing in.", 403)
             if user.get("totp_enabled"):
                 session.clear()
                 session["pending_2fa_user_id"] = user["id"]
                 session["auth_session_instance"] = app.config["AUTH_SESSION_INSTANCE"]
-                return redirect(url_for("two_factor_verify", next=request.args.get("next", "")))
+                return redirect(url_for(
+                    "two_factor_verify",
+                    next=request.args.get("next", ""),
+                    **_portal_args(),
+                ))
             session.clear() # Prevent session fixation
             session["user_id"] = user["id"]
             session["auth_session_instance"] = app.config["AUTH_SESSION_INSTANCE"]
@@ -1320,9 +1378,9 @@ def login():
             
         logger.warning(f"Failed login attempt for username: {username}")
         # Generic error message
-        return render_template("login.html", error="Invalid username or password."), 401
+        return _render_auth("Invalid username or password.", 401)
         
-    return render_template("login.html")
+    return _render_auth()
 
 @app.route("/logout", methods=["POST"])
 def logout():
@@ -1387,7 +1445,10 @@ def resend_verification():
     if user and user.get("email") and not user.get("email_verified"):
         token = _issue_auth_token(user["id"], "email_verification", timedelta(hours=24))
         _send_auth_email(email, "Verify your CertAuth email", f"Verify your account: {url_for('verify_email', token=token, _external=True)}")
-    return render_template("login.html", error="If the account exists and needs verification, an email has been sent.")
+    return _render_auth(
+        "If the account exists and needs verification, an email has been sent.",
+        notice=True,
+    )
 
 @app.route("/2fa/setup", methods=["POST"])
 @login_required
@@ -1421,7 +1482,7 @@ def two_factor_verify():
         or session.get("auth_session_instance") != app.config["AUTH_SESSION_INSTANCE"]
     ):
         session.clear()
-        return redirect(url_for("login"))
+        return redirect(url_for("hr_login" if _is_hr_portal() else "login"))
     if request.method == "POST":
         user = get_user_by_id(user_id)
         code = request.form.get("code", "").strip()
@@ -1429,7 +1490,7 @@ def two_factor_verify():
         if not valid and user:
             valid = consume_recovery_code(user_id, hashlib.sha256(code.encode()).hexdigest())
         if not valid:
-            return render_template("login.html", error="Invalid authentication code."), 401
+            return _render_auth("Invalid authentication code.", 401, mode="twofa")
         session.pop("pending_2fa_user_id", None)
         session["user_id"] = user_id
         session["auth_session_instance"] = app.config["AUTH_SESSION_INSTANCE"]
@@ -1448,8 +1509,8 @@ def two_factor_verify():
             )
         ):
             session["issue_entry_grant"] = True
-        return redirect(next_url or url_for("home"))
-    return render_template("login.html", error="Enter your authentication code.")
+        return redirect(_safe_local_next(next_url) or url_for("home"))
+    return _render_auth("Enter your authentication code.", mode="twofa", notice=True)
 
 @app.route("/forgot-password", methods=["GET", "POST"])
 @limiter.limit("3 per hour", methods=["POST"])
@@ -1459,22 +1520,136 @@ def forgot_password():
         user = get_user_by_email(email) if email else None
         if user:
             token = _issue_auth_token(user["id"], "password_reset", timedelta(hours=1))
-            _send_auth_email(email, "Reset your CertAuth password", f"Reset your password: {url_for('reset_password', token=token, _external=True)}")
-        return render_template("login.html", error="If the account exists, a password-reset email has been sent.")
-    return render_template("login.html")
+            _send_auth_email(
+                email,
+                "Reset your CertAuth password",
+                f"Reset your password: {url_for('reset_password', token=token, _external=True, **_portal_args())}",
+            )
+        return _render_auth(
+            "If the account exists, a password-reset email has been sent.",
+            mode="forgot",
+            notice=True,
+        )
+    return _render_auth(mode="forgot")
 
 @app.route("/reset-password/<token>", methods=["GET", "POST"])
 def reset_password(token):
     if request.method == "POST":
         password = request.form.get("password", "")
+        if _is_hr_portal() and password != request.form.get("confirm_password", ""):
+            return _render_auth(
+                "Passwords do not match.",
+                400,
+                mode="reset",
+                token=token,
+            )
         if not _password_is_acceptable(password):
-            return render_template("login.html", error="Invalid or expired reset link."), 400
+            return _render_auth("Invalid or expired reset link.", 400, mode="reset", token=token)
         user_id = consume_auth_token(token, "password_reset")
         if user_id is None:
-            return render_template("login.html", error="Invalid or expired reset link."), 400
+            return _render_auth("Invalid or expired reset link.", 400, mode="reset", token=token)
         set_user_password(user_id, werkzeug.security.generate_password_hash(password))
+        if _is_hr_portal():
+            return redirect(url_for("hr_login", reset="1"))
         return redirect(url_for("login"))
-    return render_template("login.html", error="Enter a new password.")
+    return _render_auth("Enter a new password.", mode="reset", notice=True, token=token)
+
+
+@app.route("/hr/login")
+def hr_login():
+    if request.args.get("reset") == "1":
+        return _render_hr_login(
+            "Password updated. Sign in with your new password.",
+            notice=True,
+        )
+    return _render_hr_login()
+
+
+def _google_redirect_uri() -> str:
+    return (os.environ.get("GOOGLE_REDIRECT_URI") or "").strip() or url_for(
+        "google_callback",
+        _external=True,
+    )
+
+
+@app.route("/auth/google")
+@limiter.limit("10 per minute")
+def google_login():
+    if not google_oauth.is_configured():
+        return _render_error_page("errors/404.html", 404, "Not found.")
+    flow = google_oauth.new_flow()
+    flow["next"] = _safe_local_next(request.args.get("next", "")) or url_for("verify")
+    session["google_oauth_flow"] = flow
+    return redirect(google_oauth.build_authorization_url(_google_redirect_uri(), flow))
+
+
+def _google_resolve_user(email: str):
+    user = get_user_by_email(email)
+    if (
+        not user
+        or not user["is_active"]
+        or user.get("role") != "VERIFIER"
+        or not user.get("email_verified")
+    ):
+        return None, "Google sign-in is not available for this account."
+    return user, None
+
+
+@app.route("/auth/google/callback")
+@limiter.limit("10 per minute")
+def google_callback():
+    if not google_oauth.is_configured():
+        return _render_error_page("errors/404.html", 404, "Not found.")
+    flow = session.pop("google_oauth_flow", None)
+    next_url = (flow or {}).get("next") or url_for("verify")
+    if request.args.get("error"):
+        return _render_hr_login("Google sign-in was cancelled.", 400, next_url=next_url)
+    state, code = request.args.get("state", ""), request.args.get("code", "")
+    if (
+        not isinstance(flow, dict)
+        or not code
+        or not state
+        or not secrets.compare_digest(
+            state.encode("utf-8"),
+            str(flow.get("state", "")).encode("utf-8"),
+        )
+    ):
+        return _render_hr_login(
+            "Google sign-in could not be verified. Please try again.",
+            400,
+            next_url=next_url,
+        )
+    try:
+        claims = google_oauth.exchange_code_for_claims(code, _google_redirect_uri(), flow)
+    except google_oauth.GoogleOAuthError as exc:
+        logger.warning("Google sign-in rejected: %s", exc)
+        return _render_hr_login("Google sign-in failed. Please try again.", 401, next_url=next_url)
+    email = claims["email"].strip().lower()
+    if not google_oauth.email_domain_allowed(email):
+        logger.warning("Google sign-in rejected: e-mail domain not allowed.")
+        return _render_hr_login(
+            "This Google account is not permitted to sign in.",
+            403,
+            next_url=next_url,
+        )
+    user, error = _google_resolve_user(email)
+    if error:
+        logger.warning("Google sign-in refused for an unavailable account.")
+        return _render_hr_login(error, 403, next_url=next_url)
+
+    from backend.database.db import update_last_login
+    if user.get("totp_enabled"):
+        session.clear()
+        session["pending_2fa_user_id"] = user["id"]
+        session["auth_session_instance"] = app.config["AUTH_SESSION_INSTANCE"]
+        return redirect(url_for("two_factor_verify", next=next_url, portal="hr"))
+    session.clear()
+    session["user_id"] = user["id"]
+    session["auth_session_instance"] = app.config["AUTH_SESSION_INSTANCE"]
+    session.permanent = True
+    update_last_login(user["id"])
+    logger.info("User '%s' logged in with Google.", user.get("username"))
+    return redirect(next_url)
 @app.route("/issue", methods=["GET", "POST"])
 @require_role(["ADMIN"])
 def issue():
@@ -1546,6 +1721,7 @@ def issue():
     # template -- it is used above for the POST error path).
     return render_template("issue.html")
 @app.route("/verify", methods=["GET", "POST"])
+@require_role(["VERIFIER", "ADMIN"])
 def verify():
     if request.method == "POST":
         file = request.files.get("certificate")

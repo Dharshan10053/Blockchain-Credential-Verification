@@ -11,3 +11,4 @@ Flask-Limiter>=4.1
 reportlab>=4.0
 qrcode>=7.4
 pyotp>=2.9
+google-auth[requests]>=2.38.0

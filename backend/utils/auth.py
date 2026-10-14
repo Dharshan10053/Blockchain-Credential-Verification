@@ -40,6 +40,10 @@ def get_current_user():
             
     return None
 
+def _login_redirect():
+    endpoint = "hr_login" if request.endpoint == "verify" else "login"
+    return redirect(url_for(endpoint, next=request.url))
+
 def login_required(f):
     @wraps(f)
     def decorated_function(*args, **kwargs):
@@ -49,7 +53,7 @@ def login_required(f):
             if request.path.startswith('/api/') or request.headers.get('Accept') == 'application/json':
                 return jsonify({"error": "Authentication required"}), 401
             # Otherwise redirect to login
-            return redirect(url_for('login', next=request.url))
+            return _login_redirect()
         return f(*args, **kwargs)
     return decorated_function
 
@@ -61,7 +65,7 @@ def require_role(roles: list[str]):
             if not user:
                 if request.path.startswith('/api/') or request.headers.get('Accept') == 'application/json':
                     return jsonify({"error": "Authentication required"}), 401
-                return redirect(url_for('login', next=request.url))
+                return _login_redirect()
                 
             if user["role"] not in roles:
                 if request.path.startswith('/api/') or request.headers.get('Accept') == 'application/json':

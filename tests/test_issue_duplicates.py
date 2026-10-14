@@ -107,6 +107,9 @@ def test_browser_issue_flow_persists_duplicate_detection_across_restart(
     current = {"hash": first_hash}
 
     monkeypatch.setattr(app_module, "BLOCKCHAIN_FILE", str(store_path))
+    upload_path = tmp_path / "uploads"
+    upload_path.mkdir()
+    monkeypatch.setattr(app_module, "UPLOAD_FOLDER", str(upload_path))
     monkeypatch.setattr(
         app_module,
         "perform_ocr",

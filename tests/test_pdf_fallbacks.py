@@ -8,8 +8,10 @@ os.environ["FLASK_ENV"] = "development"
 
 from app import app
 from backend.database.db import init_db, upsert_certificate
+from backend.utils import report_generator
 
-def test_fallbacks():
+def test_fallbacks(monkeypatch, tmp_path):
+    monkeypatch.setattr(report_generator, "_REPORT_DIR", str(tmp_path / "reports"))
     init_db()
     
     # Test Case 1: Standard AI-Extracted Certificate

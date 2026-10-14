@@ -30,7 +30,7 @@
         <svg width="14" height="14" fill="none" stroke="currentColor" stroke-width="1.6" viewBox="0 0 24 24"><path d="M12 5v14M5 12h14" stroke-linecap="round"/></svg>
         Issue
       </a></li>
-      <li><a href="{{ url_for('verify') }}" {% if request.endpoint == 'verify' %}class="active"{% endif %}>
+      <li><a href="{{ url_for('hr_login', next=url_for('verify')) }}" {% if request.endpoint == 'verify' %}class="active"{% endif %}>
         <svg width="14" height="14" fill="none" stroke="currentColor" stroke-width="1.6" viewBox="0 0 24 24"><path d="M9 12l2 2 4-4" stroke-linecap="round" stroke-linejoin="round"/><circle cx="12" cy="12" r="9"/></svg>
         Verify
       </a></li>

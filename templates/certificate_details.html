@@ -1,0 +1,32 @@
+{% extends "base.html" %}
+{% block title %}Certificate Details{% endblock %}
+
+{% block content %}
+<div class="container page-wrap">
+  <div class="ledger-header fade-up">
+    <div>
+      <div class="section-label">Admin Portal</div>
+      <h1 style="font-size:1.75rem;font-weight:700;letter-spacing:-.4px">Certificate Details</h1>
+      <p style="font-size:14px;color:var(--text-muted);margin-top:4px">
+        Read-only record from the certificate registry.
+      </p>
+    </div>
+    <a href="{{ url_for('admin_dashboard') }}" class="btn btn-secondary">Back to dashboard</a>
+  </div>
+
+  <section class="card card-padded fade-up fade-up-1" aria-label="Certificate details">
+    <div class="details-grid">
+      <div class="detail-cell"><div class="label">Certificate ID</div><div class="value">{{ certificate.cert_id or '—' }}</div></div>
+      <div class="detail-cell"><div class="label">Holder name</div><div class="value">{{ certificate.name or '—' }}</div></div>
+      <div class="detail-cell"><div class="label">Course</div><div class="value">{{ certificate.course or '—' }}</div></div>
+      <div class="detail-cell"><div class="label">Issuing authority</div><div class="value">{{ certificate.issuing_authority or '—' }}</div></div>
+      <div class="detail-cell"><div class="label">Organization</div><div class="value">{{ certificate.organization or '—' }}</div></div>
+      <div class="detail-cell"><div class="label">Issue date</div><div class="value">{{ certificate.date or '—' }}</div></div>
+      <div class="detail-cell"><div class="label">Action / status</div><div class="value">{{ certificate.action or '—' }}</div></div>
+      <div class="detail-cell"><div class="label">Record created</div><div class="value">{{ certificate.created_at or '—' }}</div></div>
+      <div class="detail-cell full"><div class="label">SHA-256 hash</div><div class="value hash-value">{{ certificate.cert_hash or '—' }}</div></div>
+    </div>
+    <a href="{{ url_for('ledger') }}" class="btn btn-ghost">View blockchain ledger</a>
+  </section>
+</div>
+{% endblock %}

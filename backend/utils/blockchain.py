@@ -140,13 +140,23 @@ class Blockchain:
             genesis.get("data"),
             genesis.get("previous_hash"),
         )
-        legacy_genesis_hash = self._compute_hash(
-            genesis.get("index"), "", genesis.get("data"), genesis.get("previous_hash")
-        )
+        valid_genesis_hashes = {expected_genesis_hash}
+        if genesis.get("data") == "Genesis Block":
+            # Keep both known historical encodings only for the exact genesis
+            # marker; neither fallback applies to arbitrary genesis data.
+            legacy_genesis_hash = self._compute_hash(
+                genesis.get("index"), "", genesis.get("data"), genesis.get("previous_hash")
+            )
+            legacy_raw_genesis_hash = hashlib.sha256(
+                f"{genesis.get('index')}{genesis.get('timestamp')}"
+                f"{genesis.get('data')}{genesis.get('previous_hash')}".encode()
+            ).hexdigest()
+            valid_genesis_hashes.add(legacy_genesis_hash)
+            valid_genesis_hashes.add(legacy_raw_genesis_hash)
         if (
             genesis.get("index") != 0
             or genesis.get("previous_hash") != "0"
-            or genesis.get("hash") not in {expected_genesis_hash, legacy_genesis_hash}
+            or genesis.get("hash") not in valid_genesis_hashes
         ):
             return False
         for i in range(1, len(self.chain)):

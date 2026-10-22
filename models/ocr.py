@@ -231,8 +231,7 @@ def extract_text(file_path: str) -> str:
             else:
                 from pdf2image import convert_from_path
                 pages = convert_from_path(file_path)
-        for page in pages:
-            text += pytesseract.image_to_string(page)
+        text = "\n".join(pytesseract.image_to_string(page) for page in pages)
     else:
         image = Image.open(file_path)
         text = pytesseract.image_to_string(image)

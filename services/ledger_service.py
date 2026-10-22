@@ -50,7 +50,7 @@ class LedgerService:
                     return json.load(f)
         except Exception as e:
             logger.error(f"Failed to load ledger: {e}")
-            return {}
+            raise
     
     def _save_ledger(self, ledger_data: dict):
         """Save ledger data to file."""

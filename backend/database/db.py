@@ -209,6 +209,8 @@ def log_verification(action_type: str, cert_hash: str, outcome: str, ip_address:
 def archive_old_logs(days_to_keep: int = 90):
     """Delete audit logs older than the specified number of days to prevent database bloat."""
     from datetime import timedelta
+    if days_to_keep < 0:
+        raise ValueError("days_to_keep must be non-negative")
     cutoff = (datetime.now(timezone.utc) - timedelta(days=days_to_keep)).isoformat()
     with _connect() as conn:
         cursor = conn.execute("DELETE FROM audit_logs WHERE timestamp < ?", (cutoff,))

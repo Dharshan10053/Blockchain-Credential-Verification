@@ -61,6 +61,16 @@ def test_unavailable_and_invalid_ocr_confidence_is_handled_safely():
     assert "capped at 75%" in result["formula"]
 
 
+def test_malformed_ocr_rows_are_ignored():
+    result = calculate_verification_confidence(
+        DETAILS,
+        [None, "not an OCR row", {"text": "Priya Sharma", "conf": 91}],
+    )
+
+    assert result["ocr_confidence_available"] is True
+    assert result["field_confidence"]["name"] == 91
+
+
 def test_date_year_conflict_reduces_consistency_and_score():
     mismatched = {**DETAILS, "year": "2023"}
 

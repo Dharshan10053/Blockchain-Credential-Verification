@@ -23,6 +23,8 @@ def _present(value) -> bool:
 def _valid_ocr_words(ocr_data: Iterable[Mapping]) -> list[tuple[str, float]]:
     words = []
     for item in ocr_data or ():
+        if not isinstance(item, Mapping):
+            continue
         text = str(item.get("text") or "").strip()
         try:
             confidence = float(item.get("conf"))

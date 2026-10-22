@@ -260,7 +260,14 @@ def consume_recovery_code(user_id: int, code_hash: str) -> bool:
         row = conn.execute("SELECT recovery_codes FROM users WHERE id = ?", (user_id,)).fetchone()
         if not row or not row["recovery_codes"]:
             return False
-        codes = json.loads(row["recovery_codes"])
+        try:
+            codes = json.loads(row["recovery_codes"])
+        except (TypeError, ValueError):
+            logger.warning("Ignoring malformed recovery codes for user %s", user_id)
+            return False
+        if not isinstance(codes, list):
+            logger.warning("Ignoring invalid recovery code data for user %s", user_id)
+            return False
         if code_hash not in codes:
             return False
         codes.remove(code_hash)

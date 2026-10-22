@@ -289,6 +289,7 @@ def consume_auth_token(raw_token: str, purpose: str) -> int | None:
     token_hash = hashlib.sha256(raw_token.encode()).hexdigest()
     now = datetime.now(timezone.utc).isoformat()
     with _connect() as conn:
+        conn.execute("BEGIN IMMEDIATE")
         row = conn.execute(
             "SELECT id, user_id, expires_at, used_at FROM auth_tokens WHERE token_hash = ? AND purpose = ?",
             (token_hash, purpose),

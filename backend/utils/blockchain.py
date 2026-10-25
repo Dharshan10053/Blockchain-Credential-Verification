@@ -132,7 +132,11 @@ class Blockchain:
 
     def is_valid(self) -> bool:
         """Validate block hashes and previous-hash linkage."""
-        if not self.chain:
+        if (
+            not isinstance(self.chain, list)
+            or not self.chain
+            or any(not isinstance(block, dict) for block in self.chain)
+        ):
             return False
         genesis = self.chain[0]
         expected_genesis_hash = self._compute_hash(

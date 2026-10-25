@@ -125,8 +125,9 @@ class Blockchain:
         hashes = set()
         for block in self.chain[1:]:
             data = block.get("data", {})
-            if isinstance(data, dict) and "hash" in data:
-                hashes.add(data["hash"])
+            cert_hash = data.get("hash") if isinstance(data, dict) else None
+            if isinstance(cert_hash, str) and cert_hash:
+                hashes.add(cert_hash)
         return hashes
 
     def is_valid(self) -> bool:

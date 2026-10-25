@@ -22,6 +22,7 @@ def generate_qr(cert_hash_or_token: str, base_url: str = "http://localhost:5000"
     try:
         import qrcode
         os.makedirs(_QR_DIR, exist_ok=True)
+        base_url = base_url.rstrip("/")
         if is_token:
             url = f"{base_url}/verify_token/{cert_hash_or_token}"
         else:

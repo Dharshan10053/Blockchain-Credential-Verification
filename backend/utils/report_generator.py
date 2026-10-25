@@ -193,7 +193,7 @@ def generate_report(result: dict, base_url: str = None) -> str:
         c.setFont("Helvetica-Bold", 14)
         c.drawString(2*cm, hash_header_y, "Blockchain Record")
 
-        hash_text = f"SHA-256: {cert_hash}"
+        hash_text = f"SHA-256: {escape(str(cert_hash))}"
         hash_p = Paragraph(hash_text, hash_style)
         hash_w, hash_h = hash_p.wrap(width - 4.5*cm, height)
         

@@ -27,7 +27,7 @@ def generate_qr(cert_hash_or_token: str, base_url: str = "http://localhost:5000"
         else:
             url = f"{base_url}/certificate/{cert_hash_or_token}"
 
-        filename = hashlib.sha256(cert_hash_or_token.encode("utf-8")).hexdigest()[:16]
+        filename = hashlib.sha256(url.encode("utf-8")).hexdigest()[:16]
         out_path = os.path.join(_QR_DIR, f"{filename}.png")
         if os.path.exists(out_path):
             return out_path

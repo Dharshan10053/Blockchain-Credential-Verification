@@ -8,6 +8,7 @@ Flask app that verifies certificate authenticity using a **blockchain-backed led
 - **Pattern-based extraction**: Certificate fields (name, course, date, ID) are extracted from OCR text using configurable patterns—no hardcoded certificate wording.
 - **Canonical hashing**: Normalized field values so minor OCR differences still produce the same hash for verification.
 - **Chain validation**: Block hashes and `previous_hash` links are validated on load.
+- **Authentication and API access**: Sign-in, QR token verification, and JSON issue/verify endpoints are available.
 
 ## Setup
 
@@ -32,9 +33,6 @@ See [ARCHITECTURE.md](ARCHITECTURE.md) for module roles and design choices.
 
 ## Possible extensions
 
-- Digital signature support  
-- QR code verification  
-- Admin authentication  
-- API endpoint for verification  
+- Digital signatures for issued certificates
 
 Cursor edit test completed.
